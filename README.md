@@ -1,4 +1,4 @@
-# FedMed — Federated Diagnostic Support Platform
+# FedHeal — Federated Learning Healthcare AI
 
 Starter codebase for the first development milestone, split across a 4-person team
 following the build order from the project proposal:
