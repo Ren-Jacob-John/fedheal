@@ -1,0 +1,12 @@
+# --- Installable in this environment / on any lightweight dev machine ---
+xgboost==3.3.0
+lightgbm==4.7.0
+scikit-learn==1.5.2
+numpy==1.26.4
+pandas==2.2.3
+
+# --- Needed only for the REAL imaging models in models/imaging_*.py ---
+# Not installed in this sandbox (disk-constrained); install on a real dev
+# machine or training server before running the imaging specialists for real.
+# torch>=2.2
+# torchvision>=0.17

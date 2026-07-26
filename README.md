@@ -8,6 +8,19 @@ following the build order from the project proposal:
 3. Local training (XGBoost/logistic regression) + Flower federated loop across simulated hospitals
 4. Dashboard wired to show login + training/round status
 
+## Model / algorithm / framework catalog
+
+**Read `docs/model-algorithm-catalog.md` before building any new disease
+specialist.** It covers every model family, algorithm, and framework
+relevant to medical diagnosis + reasoning — imaging (2D classification,
+segmentation, whole-slide/histopathology), tabular/EHR, genomic/omics,
+clinical NLP, time-series, survival analysis, multi-modal fusion, and
+explainability/reasoning methods (Grad-CAM, SHAP, causal inference,
+knowledge graphs, etc.) — not just the five models currently implemented
+in `module5-modelzoo`. Disease-specific notes for breast cancer and
+leukemia are included, plus a general pattern for any disease not yet
+named. Every future stage should pick its model(s) from this document.
+
 ## Team assignment
 
 | Person | Module | Folder | Status this sprint |
@@ -16,6 +29,12 @@ following the build order from the project proposal:
 | **P2 — Data Engineer** | Data Ingestion & Validation | `module2-validation/` | ✅ Done & tested. Schema, range, consistency, and outlier checks. |
 | **P3 — ML Engineer** | Local Training + Federated Aggregation | `module3-fedlearning/` | ✅ Done & tested. Working FedAvg simulation, 3 hospitals, non-IID data. |
 | **P4 — Frontend** | Hospital Dashboard | `module4-dashboard/` | ✅ Done & tested. Plain HTML/JS wired to Module 1's real API. |
+| **P3 (cont.) — ML Engineer** | Model Zoo & Task Router | `module5-modelzoo/` | ✅ Done & tested. XGBoost (real) + DenseNet201/ResNet50/EfficientNet/U-Net (real code, stubbed in this sandbox — see its README) coexisting via a router + fusion layer. |
+
+> Note: this was built against a 5-step build order from the original
+> proposal, not a 16-stage plan — if your course/team has a specific
+> 16-stage breakdown, share it and the module numbering here can be
+> remapped to match.
 
 Every module runs and was smoke-tested independently. They are **not yet
 wired to each other** on purpose — that's next sprint's integration work
