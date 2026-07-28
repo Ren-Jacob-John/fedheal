@@ -1,0 +1,13 @@
+# Real, installed, tested in this sandbox:
+scikit-learn==1.5.2
+xgboost==3.3.0
+lightgbm==4.7.0
+numpy>=1.26
+pandas==2.2.3
+shap==0.52.0
+lifelines==0.30.3
+
+# Needed only for the histopathology MIL specialist and Grad-CAM explainer
+# (both fall back to a labeled stub automatically if these aren't installed):
+# torch>=2.2
+# torchvision>=0.17
