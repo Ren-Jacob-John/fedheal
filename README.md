@@ -1,88 +1,90 @@
-# Module 5 — Model Zoo & Task Router (Stage 2)
+# FedHeal — Federated Learning Healthcare AI
 
-Implements the "model zoo + router" pattern from the proposal: instead of
-one model trying to do everything, several specialist architectures
-**coexist**, each handling only the task/modality it was built for, with a
-router deciding which one sees a given case.
+Starter codebase for the first development milestone, split across a 4-person team
+following the build order from the project proposal:
 
-## Setup
+1. Auth + multi-tenancy (get hospital logins working)
+2. Data ingestion + validation (structured-data track)
+3. Local training (XGBoost/logistic regression) + Flower federated loop across simulated hospitals
+4. Dashboard wired to show login + training/round status
+
+## Model / algorithm / framework catalog
+
+**Read `docs/model-algorithm-catalog.md` before building any new disease
+specialist.** It covers every model family, algorithm, and framework
+relevant to medical diagnosis + reasoning — imaging (2D classification,
+segmentation, whole-slide/histopathology), tabular/EHR, genomic/omics,
+clinical NLP, time-series, survival analysis, multi-modal fusion, and
+explainability/reasoning methods (Grad-CAM, SHAP, causal inference,
+knowledge graphs, etc.) — not just the five models currently implemented
+in `module5-modelzoo`. Disease-specific notes for breast cancer and
+leukemia are included, plus a general pattern for any disease not yet
+named. Every future stage should pick its model(s) from this document.
+
+## Team assignment
+
+| Person | Module | Folder | Status this sprint |
+|---|---|---|---|
+| **P1 — Backend/Auth** | Authentication & Multi-Tenancy | `module1-auth/` | ✅ Done & tested. Hospital register/login/JWT, hospital-scoped endpoints. |
+| **P2 — Data Engineer** | Data Ingestion & Validation | `module2-validation/` | ✅ Done & tested. Schema, range, consistency, and outlier checks. |
+| **P3 — ML Engineer** | Local Training + Federated Aggregation | `module3-fedlearning/` | ✅ Done & tested. Working FedAvg simulation, 3 hospitals, non-IID data. |
+| **P4 — Frontend** | Hospital Dashboard | `module4-dashboard/` | ✅ Done & tested. Plain HTML/JS wired to Module 1's real API. |
+| **P3 (cont.) — ML Engineer** | Model Zoo & Task Router | `module5-modelzoo/` | ✅ Done & tested. XGBoost (real) + DenseNet201/ResNet50/EfficientNet/U-Net (real code, stubbed in this sandbox — see its README) coexisting via a router + fusion layer. |
+| **P3 (cont.) — ML Engineer** | Condition Router (auto-switch by disease) | `module6-condition-router/` | ✅ Done & tested. Mention a disease (breast cancer, leukemia, diabetic retinopathy, etc.) and it auto-routes to the right specialist(s) + reasoning method(s) — see its README for the 5 verified condition pathways. |
+| **P1 (cont.) — Backend/Auth** | Admin / Platform Module (the operator's view) | `module7-admin/` | ✅ Done & tested. Hospital oversight (proxies Module 1), training-round history, validation-flag summaries, and a working "trigger a round" endpoint. First real cross-module wiring — see its README for exactly what's real. |
+
+> Week mapping for this build: Week 1 = Modules 1–4, Week 2 = Module 5,
+> Week 3 = Module 6, Week 4 = Module 7. This is the 8-module breakdown
+> from the original proposal, not a 16-stage syllabus — if your
+> course/team has a specific 16-stage breakdown, share it and this
+> numbering can be remapped to match.
+
+Every module runs and was smoke-tested independently. Modules 1–6 were
+**not wired to each other** on purpose in earlier sprints — Module 7 is
+where the first real integration work landed: it proxies live to Module 1
+for hospital status, and Modules 2 and 3 now report to it (validation
+flags, training rounds) over a best-effort HTTP call that degrades
+gracefully if Module 7 isn't running. Real data flowing all the way from
+validation → training → dashboard is still next sprint's work.
+
+Each folder is independently runnable so the four of you aren't blocked on each other
+this sprint. Module 3 doesn't depend on Module 1/2 yet — it uses synthetic data so ML
+work can start immediately. Wire them together (real data flowing from validation →
+training, real JWTs gating the dashboard) in the *next* sprint.
+
+## Why this order
+
+- Module 3 (FedAvg loop) is the riskiest/most novel piece technically, so it starts now,
+  in isolation, on synthetic data — nobody wants to discover in week 4 that the
+  federated averaging logic doesn't work.
+- Module 1 and 2 can be built in parallel; neither depends on the other.
+- Module 4 just needs Module 1's API contract (see `module1-auth/README.md`) to start
+  wiring real requests instead of mocked ones.
+
+## Running things
+
+Each module has its own README with exact setup commands. Quick summary:
 
 ```bash
-pip install -r requirements.txt --break-system-packages
-python demo.py
+# Module 1 — Auth API
+cd module1-auth && pip install -r requirements.txt --break-system-packages
+uvicorn main:app --reload --port 8001
+
+# Module 2 — Validation service
+cd module2-validation && pip install -r requirements.txt --break-system-packages
+uvicorn main:app --reload --port 8002
+
+# Module 3 — Federated learning simulation
+cd module3-fedlearning && pip install -r requirements.txt --break-system-packages
+python simulate.py
+
+# Module 4 — Dashboard (no build step, just open it)
+cd module4-dashboard && python -m http.server 8080
+# then open http://localhost:8080
+
+# Module 7 — Admin/Platform service (start Module 1 first — it proxies to it)
+cd module7-admin && pip install -r requirements.txt --break-system-packages
+export FEDMED_JWT_SECRET=dev-only-change-me   # MUST match Module 1's
+export FEDMED_SERVICE_KEY=dev-only-internal-service-key
+uvicorn main:app --reload --port 8005
 ```
-
-## What's in here
-
-| File | Role |
-|---|---|
-| `base.py` | `SpecialistModel` interface + `PredictionResult` — the contract every specialist implements, so the router never needs to know which architecture it's talking to |
-| `models/tabular_vitals.py` | **XGBoost** — structured vitals (real, fully working, no heavy dependency) |
-| `models/imaging_chest_xray.py` | **DenseNet201** — chest X-ray findings (pneumonia/TB) |
-| `models/imaging_retina.py` | **ResNet50** — diabetic retinopathy grading |
-| `models/imaging_skin.py` | **EfficientNet-B0** — skin lesion classification |
-| `models/imaging_segmentation.py` | **Custom U-Net** — pixel-level segmentation (tumor/organ boundaries) |
-| `models/stub.py` | Placeholder used only when a real specialist's dependencies aren't installed |
-| `registry.py` | Builds `{modality: [SpecialistModel, ...]}` — the model zoo itself |
-| `router.py` | `MetadataRouter` — picks the right specialist(s) for a case |
-| `fusion.py` | Combines multiple specialists' outputs into one overall risk assessment |
-| `demo.py` | **Run this.** Proves all five specialists coexist and are correctly routed |
-
-## Why the imaging specialists are stubs when you run this
-
-This model zoo uses five different architectures. Only one — XGBoost for
-vitals — is lightweight enough to actually install and run in every
-environment. DenseNet201, ResNet50, EfficientNet, and U-Net need
-`torch` + `torchvision`, which are large (multi-GB with CUDA
-dependencies) and weren't installed when this was built (disk-constrained
-sandbox). Rather than skip those four specialists, `registry.py` detects
-whether `torch` imports cleanly and **automatically substitutes a clearly
-labeled stub** (`is_stub=True` on every result) if it doesn't — so the
-router/fusion logic is fully exercised end-to-end regardless.
-
-**On your own machine**, install torch + torchvision:
-```bash
-pip install torch torchvision
-```
-Re-run `python demo.py` — the four imaging specialists switch from stubs
-to their real architectures automatically, with zero code changes needed
-in `router.py`, `fusion.py`, or `demo.py`. The model code itself
-(`models/imaging_*.py`) is real, correct torchvision transfer-learning
-setup — it just hasn't been execution-tested in this sandbox.
-
-## Why routing is metadata-based, not a learned classifier
-
-The proposal names two options: metadata (DICOM tags, upload form) or a
-lightweight learned classifier. This sprint implements the metadata
-option — a case must declare its own modality — because running the wrong
-specialist on an input "would produce a confident, meaningless answer,"
-per the proposal, and metadata-based routing is the safer default until
-there's labeled data to train a modality classifier against. See
-`ClassifierBasedRouter` in `router.py` for where that goes next.
-
-## Try it yourself
-
-```python
-from registry import build_registry
-from router import MetadataRouter
-from fusion import FusionLayer
-
-router = MetadataRouter(build_registry())
-result = router.route({"modality": "vitals", "features": [0.9, 0.1, -0.2, -0.8, 0.7, 0.0, 1, 0]})
-print(result.label, result.confidence)
-```
-
-## Next sprint (not yet done here, on purpose)
-
-- Install torch/torchvision on a real dev machine and verify the four real
-  imaging specialists actually run forward passes on real (or synthetic)
-  images.
-- Wire Module 2's validated records into `case["features"]` /
-  `case["image"]` instead of hand-built demo cases.
-- Federate each imaging specialist the same way Module 3 federates the
-  vitals model — "federation still applies per-model," per the proposal:
-  DenseNet201 federates across hospitals with chest X-ray data, the retina
-  model federates across eye clinics, etc.
-- Wire Grad-CAM into the imaging specialists' `explanation` field (the
-  proposal's explainability layer) — currently `None`.
-- Train `ClassifierBasedRouter` once there's labeled modality data.
