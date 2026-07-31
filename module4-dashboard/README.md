@@ -32,6 +32,15 @@ auth service moves.
 - Replace `localStorage` token storage with something not readable by any
   injected JS (httpOnly cookie set by the server) before this touches real
   hospital data.
-- Render Module 3's real per-round training status instead of Module 1's
-  `FAKE_TRAINING_STATUS_DB` placeholder.
-- Add the upload flow for Module 2's validation endpoint (CSV/JSON vitals upload).
+- The upload form takes pasted JSON, not a CSV file picker — fine for a
+  demo, not for a clinician's actual workflow. Add real file upload once
+  Module 2's CSV support (if any) is decided.
+
+## Done this sprint (previously listed here as not-yet-done)
+
+- Real per-hospital training status: `renderTrainingStatus` now shows
+  Module 1's actual `records_available` / `status` / `last_upload`, not
+  the old `FAKE_TRAINING_STATUS_DB` shape.
+- Vitals upload flow: the "Upload vitals" section posts a pasted JSON
+  array to Module 1's `POST /vitals/upload`, which validates via Module 2
+  and stores passed/flagged records — see `module1-auth/README.md`.

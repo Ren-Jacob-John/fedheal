@@ -43,6 +43,24 @@
   <button id="logout-btn">Log out</button>
 </section>
 
+<section id="upload-section" class="hidden">
+  <h2>Upload vitals</h2>
+  <p style="font-size:0.85rem;color:#555;">
+    Paste a JSON array of vitals records (Module 2's schema — see
+    <code>module2-validation/schema.py</code>). Every record is validated
+    before storage; only <strong>passed</strong>/<strong>flagged</strong>
+    records get stored against your hospital, never rejected ones.
+  </p>
+  <textarea id="vitals-input" rows="8" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:0.85rem;">[
+  {"patient_ref": "P-001", "age_years": 54, "height_cm": 170, "weight_kg": 78,
+   "systolic_bp": 132, "diastolic_bp": 84, "heart_rate_bpm": 76,
+   "medication_count": 1, "medication_mg_total": 50}
+]</textarea>
+  <button id="upload-btn">Validate &amp; upload</button>
+  <div id="upload-error" class="error hidden"></div>
+  <div id="upload-result"></div>
+</section>
+
 <script>
 // Module 1's auth service. Change this if you run it on a different host/port.
 const AUTH_API_BASE = "http://localhost:8001";
@@ -98,11 +116,11 @@ async function authedGet(path) {
 function renderTrainingStatus(status) {
   const el = document.getElementById("training-status");
   // super_admin sees a dict of {hospital_id: status}; everyone else sees one status object
-  if (status.round !== undefined) {
+  if (status.records_available !== undefined) {
     el.innerHTML = `
-      <div class="status-row"><span>Round</span><span>${status.round}</span></div>
+      <div class="status-row"><span>Validated records</span><span>${status.records_available}</span></div>
       <div class="status-row"><span>Status</span><span>${status.status}</span></div>
-      <div class="status-row"><span>Last sync</span><span>${status.last_sync ?? "never"}</span></div>
+      <div class="status-row"><span>Last upload</span><span>${status.last_upload ?? "never"}</span></div>
     `;
   } else {
     el.innerHTML = "<em>Admin view — per-hospital status not yet rendered. See raw response:</em>"
@@ -123,6 +141,7 @@ function logout() {
   token = null;
   localStorage.removeItem("fedmed_token");
   document.getElementById("status-section").classList.add("hidden");
+  document.getElementById("upload-section").classList.add("hidden");
   document.getElementById("login-section").classList.remove("hidden");
 }
 
@@ -135,19 +154,55 @@ document.getElementById("login-btn").addEventListener("click", async () => {
     localStorage.setItem("fedmed_token", token);
     document.getElementById("login-section").classList.add("hidden");
     document.getElementById("status-section").classList.remove("hidden");
+    document.getElementById("upload-section").classList.remove("hidden");
     await loadDashboard();
   } catch (err) {
     showError("login-error", err.message);
   }
 });
 
+async function uploadVitals() {
+  clearError("upload-error");
+  document.getElementById("upload-result").innerHTML = "";
+  let records;
+  try {
+    records = JSON.parse(document.getElementById("vitals-input").value);
+    if (!Array.isArray(records)) throw new Error("Must be a JSON array of records.");
+  } catch (err) {
+    showError("upload-error", `Invalid JSON: ${err.message}`);
+    return;
+  }
+
+  const resp = await fetch(`${AUTH_API_BASE}/vitals/upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ records }),
+  });
+  if (!resp.ok) {
+    const detail = await resp.json().catch(() => ({}));
+    showError("upload-error", detail.detail || `Upload failed (${resp.status})`);
+    return;
+  }
+  const result = await resp.json();
+  document.getElementById("upload-result").innerHTML = `
+    <div class="status-row"><span>Total</span><span>${result.total}</span></div>
+    <div class="status-row"><span>Passed</span><span>${result.passed}</span></div>
+    <div class="status-row"><span>Flagged</span><span>${result.flagged}</span></div>
+    <div class="status-row"><span>Rejected</span><span>${result.rejected}</span></div>
+    <div class="status-row"><span>Stored to your hospital</span><span>${result.stored}</span></div>
+  `;
+  await loadDashboard(); // refresh the "validated records" count now that we've stored some
+}
+
 document.getElementById("refresh-btn").addEventListener("click", loadDashboard);
 document.getElementById("logout-btn").addEventListener("click", logout);
+document.getElementById("upload-btn").addEventListener("click", uploadVitals);
 
 // If we already have a token from a previous session, skip straight to the dashboard.
 if (token) {
   document.getElementById("login-section").classList.add("hidden");
   document.getElementById("status-section").classList.remove("hidden");
+  document.getElementById("upload-section").classList.remove("hidden");
   loadDashboard().catch((err) => {
     showError("login-error", err.message);
     logout();

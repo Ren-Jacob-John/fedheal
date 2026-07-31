@@ -8,6 +8,17 @@ following the build order from the project proposal:
 3. Local training (XGBoost/logistic regression) + Flower federated loop across simulated hospitals
 4. Dashboard wired to show login + training/round status
 
+## Documentation map
+
+- **`docs/16-week-development-plan.md`** — the full 16-week schedule this
+  project follows, from initial proposal through final demo. Weeks 1–9
+  cover the modules already in this repo; weeks 10–16 are the forward plan.
+- **Every `moduleN-*/EXPLANATION.md`** — a full, presentation-ready
+  explanation of what that module does, how it works, and how it connects
+  to the rest of the system. (`moduleN-*/README.md` stays the terse,
+  dev-facing "how to run this" reference — the two are meant to be read
+  together, not as duplicates.)
+
 ## Model / algorithm / framework catalog
 
 **Read `docs/model-algorithm-catalog.md` before building any new disease
@@ -40,17 +51,24 @@ named. Every future stage should pick its model(s) from this document.
 > numbering can be remapped to match.
 
 Every module runs and was smoke-tested independently. Modules 1–6 were
-**not wired to each other** on purpose in earlier sprints — Module 7 is
-where the first real integration work landed: it proxies live to Module 1
-for hospital status, and Modules 2 and 3 now report to it (validation
-flags, training rounds) over a best-effort HTTP call that degrades
-gracefully if Module 7 isn't running. Real data flowing all the way from
-validation → training → dashboard is still next sprint's work.
+**not wired to each other** on purpose in earlier sprints — Module 7
+brought the first real integration (dashboard status, training rounds,
+validation flags), and **this sprint wires the actual data flow**: Module 1
+now has a real `POST /vitals/upload` (forwards to Module 2 for validation,
+stores passed/flagged records per hospital) and `GET /vitals/export`
+(service-key gated, for Module 3), `training-status` is DB-backed instead
+of a fake dict, the dashboard has a real upload form, and
+`module3-fedlearning/simulate_real.py` runs FedAvg over that real,
+validated hospital data instead of synthetic partitions. The one honest
+gap left: uploaded vitals don't yet carry a real diagnosis/outcome label,
+so `real_data.py` falls back to a rule-based placeholder — see its
+docstring before treating any accuracy number from `simulate_real.py` as
+clinically meaningful.
 
 Each folder is independently runnable so the four of you aren't blocked on each other
-this sprint. Module 3 doesn't depend on Module 1/2 yet — it uses synthetic data so ML
-work can start immediately. Wire them together (real data flowing from validation →
-training, real JWTs gating the dashboard) in the *next* sprint.
+this sprint. Module 3's `simulate.py` still doesn't depend on Module 1/2 — it uses
+synthetic data so ML work can start immediately without a live pipeline; use
+`simulate_real.py` once you want to exercise the real, wired-up path.
 
 ## Why this order
 
@@ -76,7 +94,8 @@ uvicorn main:app --reload --port 8002
 
 # Module 3 — Federated learning simulation
 cd module3-fedlearning && pip install -r requirements.txt --break-system-packages
-python simulate.py
+python simulate.py          # synthetic data, no dependencies on other modules
+python simulate_real.py     # real hospital data — needs Module 1 + Module 2 running first
 
 # Module 4 — Dashboard (no build step, just open it)
 cd module4-dashboard && python -m http.server 8080

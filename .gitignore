@@ -1,0 +1,16 @@
+# Local env files with real secrets — never commit these
+.env
+module1-auth/.env
+module7-admin/.env
+
+# Local SQLite fallback DBs (used only when Supabase isn't configured)
+*.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node (if the frontend gets rebuilt in React/Next.js later)
+node_modules/

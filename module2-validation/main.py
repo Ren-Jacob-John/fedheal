@@ -15,8 +15,11 @@ Only records that pass 1-4 are eligible to reach Module 3's local training —
 flagged-but-passing records (step 5) go to the hospital dashboard for human
 review rather than silently being dropped or silently being trained on.
 """
+import os
+from collections import Counter
 from typing import Literal
 
+import httpx
 from fastapi import FastAPI
 from pydantic import BaseModel, ValidationError
 
@@ -25,6 +28,35 @@ from rules import check_forbidden_fields, check_plausible_ranges, check_cross_fi
 from schema import VitalsRecord
 
 app = FastAPI(title="FedHeal Data Validation Service", version="0.1.0")
+
+# Module 7 (Admin/Platform) integration — best-effort only. If the admin
+# service isn't running, validation still works exactly as before; we just
+# have nowhere to report the flag summary to. This is a rolled-up COUNT per
+# reason string, never a raw record, matching the "operator can see flags,
+# never patient data" design.
+ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
+ADMIN_SERVICE_KEY = os.environ.get("FEDMED_SERVICE_KEY", "dev-only-internal-service-key")
+
+
+def report_flags_to_admin(hospital_id: str | None, results: list["ValidationResult"]) -> None:
+    if not hospital_id:
+        return  # no tenant to attribute this batch to — skip rather than guess
+    tallies: Counter[tuple[str, str]] = Counter()
+    for r in results:
+        if r.status == "passed":
+            continue
+        for reason in r.reasons:
+            tallies[(r.status, reason)] += 1
+    for (status, reason), count in tallies.items():
+        try:
+            httpx.post(
+                f"{ADMIN_API_URL}/admin/flags",
+                json={"hospital_id": hospital_id, "status": status, "reason": reason, "count": count},
+                headers={"X-Service-Key": ADMIN_SERVICE_KEY},
+                timeout=2.0,
+            )
+        except httpx.HTTPError:
+            pass  # admin dashboard is a nice-to-have view, not a dependency of validation itself
 
 
 class ValidationResult(BaseModel):
@@ -35,6 +67,10 @@ class ValidationResult(BaseModel):
 
 class BatchValidationRequest(BaseModel):
     records: list[dict]
+    # Optional so this endpoint keeps working exactly as before for anyone
+    # calling it without a tenant context. When present, flag/reject counts
+    # get attributed to this hospital for Module 7's dashboard.
+    hospital_id: str | None = None
 
 
 class BatchValidationResponse(BaseModel):
@@ -100,6 +136,8 @@ def validate_vitals_batch(payload: BatchValidationRequest):
     passed = sum(1 for r in results if r.status == "passed")
     flagged = sum(1 for r in results if r.status == "flagged")
     rejected = sum(1 for r in results if r.status == "rejected")
+
+    report_flags_to_admin(payload.hospital_id, results)
 
     return BatchValidationResponse(
         total=len(results), passed=passed, flagged=flagged, rejected=rejected, results=results

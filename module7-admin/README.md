@@ -87,10 +87,21 @@ No Module 1/2/3 running yet and just want to see the shape of the data?
 `python seed_demo.py` populates rounds + flags directly into this
 service's own SQLite DB.
 
+## Using Supabase
+
+Same pattern as `module1-auth` — `cp .env.example .env`, fill in your
+Supabase connection string, `pip install -r requirements.txt`. By default
+this reuses `module1-auth`'s `FEDHEAL_DATABASE_URL` (same Supabase
+project, different tables — no naming collisions). Set
+`FEDHEAL_ADMIN_DATABASE_URL` instead if you'd rather keep this module's
+`training_rounds`/`validation_flags` tables in a separate project. Leave
+both unset to fall back to local SQLite.
+
 ## Env vars
 
 | Var | Default | Meaning |
 |---|---|---|
+| `FEDHEAL_DATABASE_URL` / `FEDHEAL_ADMIN_DATABASE_URL` | local SQLite | Supabase/Postgres connection string — see "Using Supabase" above |
 | `FEDMED_JWT_SECRET` | `dev-only-change-me` | Must match Module 1's — this service only verifies tokens, never issues them. |
 | `FEDMED_SERVICE_KEY` | `dev-only-internal-service-key` | Shared secret Module 2/3 use to post rounds/flags here. |
 | `FEDMED_AUTH_API_URL` | `http://localhost:8001` | Where Module 1 is reachable, for the hospital proxy calls. |

@@ -22,6 +22,9 @@ server averages those weights (FedAvg), and the resulting global model
 outperforms what any single hospital could train alone — the whole point
 of the project.
 """
+import os
+
+import httpx
 import numpy as np
 
 from client import HospitalClient
@@ -30,6 +33,32 @@ from model import build_model, get_model_parameters
 
 N_HOSPITALS = 3
 N_ROUNDS = 8
+
+# Module 7 (Admin/Platform) integration — best-effort, same principle as
+# Module 2's: this simulation must run identically whether or not the
+# admin service is up. We're only ever sending round number / hospital
+# count / accuracy numbers here, never any training data.
+ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
+ADMIN_SERVICE_KEY = os.environ.get("FEDMED_SERVICE_KEY", "dev-only-internal-service-key")
+
+
+def report_round_to_admin(round_number: int, n_hospitals: int,
+                           global_accuracy: float, baseline_accuracy: float) -> None:
+    try:
+        httpx.post(
+            f"{ADMIN_API_URL}/admin/rounds",
+            json={
+                "round_number": round_number,
+                "n_hospitals": n_hospitals,
+                "global_accuracy": global_accuracy,
+                "baseline_accuracy": baseline_accuracy,
+                "notes": "reported by simulate.py",
+            },
+            headers={"X-Service-Key": ADMIN_SERVICE_KEY},
+            timeout=2.0,
+        )
+    except httpx.HTTPError:
+        pass  # admin dashboard is a nice-to-have view, not a dependency of training itself
 
 
 def federated_average(client_params: list[list[np.ndarray]], client_sizes: list[int]) -> list[np.ndarray]:
@@ -109,6 +138,7 @@ def main():
         global_acc = eval_model.score(X_global_holdout, y_global_holdout)
 
         print(f"{round_num:>5} | {global_acc:>36.3f}")
+        report_round_to_admin(round_num, N_HOSPITALS, global_acc, baseline_acc)
 
     print(f"\nFinal federated global model accuracy (global holdout): {global_acc:.3f}")
     print(f"Local-only baseline (global holdout):                    {baseline_acc:.3f}")

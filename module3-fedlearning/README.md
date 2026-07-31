@@ -12,10 +12,12 @@ python simulate.py
 | File | Role |
 |---|---|
 | `data.py` | Synthetic vitals dataset + Dirichlet non-IID partitioning across N simulated hospitals |
+| `real_data.py` | **New this sprint.** Pulls each active hospital's real, validated vitals from Module 1 (`GET /vitals/export`) instead of synthetic data — same `(X, y)` contract as `data.py`, so nothing downstream changes. See its docstring for the placeholder-label caveat. |
 | `model.py` | The shared model architecture (logistic regression via `SGDClassifier`) and weight get/set helpers |
 | `client.py` | `HospitalClient` — a Flower `NumPyClient`. This is the exact class a real hospital's local app would run. |
-| `simulate.py` | **Run this.** Manually drives federated rounds in one process (no Ray needed) so it runs anywhere with no extra setup. |
-| `server.py` | Reference for a REAL networked Flower server — next sprint's work, not used by `simulate.py`. |
+| `simulate.py` | Manually drives federated rounds in one process over **synthetic** data (no Ray needed) so it runs anywhere with no extra setup. |
+| `simulate_real.py` | **New this sprint.** Same FedAvg loop as `simulate.py`, but over **real** hospital data via `real_data.py` — requires Module 1 + Module 2 running and at least 2 hospitals with validated vitals uploaded. |
+| `server.py` | Reference for a REAL networked Flower server — next sprint's work, not used by either `simulate*.py`. |
 
 ## Why `simulate.py` doesn't use Flower's built-in simulation runner
 
@@ -57,13 +59,29 @@ understanding, not a bug to chase away.
 
 ## Next sprint (not yet done here, on purpose)
 
-- Swap `data.py`'s synthetic data for a real public dataset (UCI Heart
-  Disease, MIMIC-III-derived features) — nothing downstream needs to change.
 - Swap `SGDClassifier` for XGBoost or a small PyTorch net (see the
   proposal's model-zoo discussion) — only `model.py` and `client.py`'s
   fit/evaluate need to change.
 - Stand up `server.py` for real, and write a `client_runner.py` that a
   "hospital" machine actually runs (`fl.client.start_numpy_client`),
-  swapping the in-process loop in `simulate.py` for real gRPC traffic.
-- Wire Module 2's validation output in as this module's training data,
-  instead of the synthetic partitions.
+  swapping the in-process loop in `simulate_real.py` for real gRPC traffic.
+- Real diagnosis/outcome labels. `real_data.py` currently falls back to a
+  rule-based placeholder label for any vitals record uploaded without one —
+  see its docstring. That's fine for proving the pipeline runs end-to-end,
+  not for anything resembling clinical evaluation. This is the actual next
+  blocker, not a nice-to-have.
+
+## Running against real data (`simulate_real.py`)
+
+```bash
+# terminal 1
+cd module1-auth && uvicorn main:app --port 8001
+# terminal 2
+cd module2-validation && uvicorn main:app --port 8002
+# then, after creating >=2 hospitals and uploading >=10 vitals records each
+# via module4-dashboard's upload form (or curl — see module1-auth/README.md):
+cd module3-fedlearning && python simulate_real.py
+```
+
+If fewer than 2 hospitals have enough validated data yet, it exits with
+instructions instead of silently falling back to synthetic data.

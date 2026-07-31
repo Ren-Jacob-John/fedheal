@@ -8,12 +8,25 @@ variable / secrets manager and rotate it.
 import os
 from datetime import datetime, timedelta, timezone
 
+from fastapi import Header, HTTPException
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 
 SECRET_KEY = os.environ.get("FEDMED_JWT_SECRET", "dev-only-change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+# Same shared-secret pattern Module 7 uses for its service-to-service
+# endpoints (see module7-admin/auth.py's docstring for the reasoning) —
+# this is what gates Module 3's real-data loader reading a hospital's
+# stored vitals via GET /vitals/export. Not a substitute for real
+# service auth (mTLS / per-service keys) before this touches real data.
+SERVICE_KEY = os.environ.get("FEDMED_SERVICE_KEY", "dev-only-internal-service-key")
+
+
+def require_service_key(x_service_key: str | None = Header(default=None)) -> None:
+    if x_service_key != SERVICE_KEY:
+        raise HTTPException(status_code=401, detail="Missing or invalid service key")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
