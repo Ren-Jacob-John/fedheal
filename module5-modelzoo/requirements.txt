@@ -1,5 +1,8 @@
 # --- Installable in this environment / on any lightweight dev machine ---
-xgboost==3.3.0
+tabpfn>=2.0          # current-gen default for the vitals specialist — see
+                      # docs/model-algorithm-catalog.md Section 4. Pure Python,
+                      # no GPU strictly required for vitals-sized tables.
+xgboost==3.3.0        # kept as fallback/ensemble partner, still current practice
 lightgbm==4.7.0
 scikit-learn==1.5.2
 numpy==1.26.4
@@ -10,3 +13,4 @@ pandas==2.2.3
 # machine or training server before running the imaging specialists for real.
 # torch>=2.2
 # torchvision>=0.17
+# transformers>=4.40  # for BiomedCLIP/MedGemma/CONCH — see catalog Sections 1, 3, 6

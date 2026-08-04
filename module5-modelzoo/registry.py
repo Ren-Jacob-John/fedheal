@@ -16,6 +16,12 @@ from models.stub import StubSpecialistModel
 from models.tabular_vitals import XGBoostVitalsModel
 
 try:
+    from models.tabular_vitals_tabpfn import TabPFNVitalsModel
+    TABPFN_IMPORT_OK = True
+except (ImportError, OSError):
+    TABPFN_IMPORT_OK = False
+
+try:
     from models.imaging_chest_xray import DenseNet201ChestXrayModel, CLASS_NAMES as CXR_CLASSES
     from models.imaging_retina import ResNet50RetinaModel, CLASS_NAMES as RETINA_CLASSES
     from models.imaging_skin import EfficientNetSkinLesionModel, CLASS_NAMES as SKIN_CLASSES
@@ -28,7 +34,7 @@ except (ImportError, OSError):
     SKIN_CLASSES = ["benign_nevus", "melanoma", "basal_cell_carcinoma", "other"]
 
 
-def build_registry(fitted_vitals_model: XGBoostVitalsModel | None = None) -> dict[str, list]:
+def build_registry(fitted_vitals_model=None) -> dict[str, list]:
     """
     Returns {modality: [SpecialistModel, ...]}. Most modalities map to a
     single specialist; nothing stops a modality having more than one
@@ -37,9 +43,21 @@ def build_registry(fitted_vitals_model: XGBoostVitalsModel | None = None) -> dic
     """
     registry: dict[str, list] = {}
 
-    # --- Structured vitals: always real, no heavy dependency ---
-    vitals_model = fitted_vitals_model or XGBoostVitalsModel()
-    registry["vitals"] = [vitals_model]
+    # --- Structured vitals ---
+    # TabPFN v2 is the current-generation default per
+    # docs/model-algorithm-catalog.md (Section 4) — a tabular foundation
+    # model that now matches/beats XGBoost on data this size. XGBoost
+    # stays registered alongside it as a still-current fallback/ensemble
+    # partner, and as what runs when `tabpfn` isn't installed.
+    if fitted_vitals_model is not None:
+        registry["vitals"] = [fitted_vitals_model]
+    elif TABPFN_IMPORT_OK:
+        try:
+            registry["vitals"] = [TabPFNVitalsModel(), XGBoostVitalsModel()]
+        except (ImportError, OSError):
+            registry["vitals"] = [XGBoostVitalsModel()]
+    else:
+        registry["vitals"] = [XGBoostVitalsModel()]
 
     # --- Imaging specialists: real if torch/torchvision installed, else stub ---
     if IMAGING_IMPORTS_OK:

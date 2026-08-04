@@ -1,185 +1,218 @@
 # FedHeal — Model / Algorithm / Framework Catalog
 
+**Last modernized:** this revision replaces the original 2020–2023-era
+catalog with the current (2025–2026) generation of models per modality.
+The old catalog wasn't wrong, it's just aged — most fields below have
+since gained **foundation models**: large models pretrained once on huge
+unlabeled/weakly-labeled corpora, then adapted cheaply per task instead of
+training a CNN/tree from scratch per hospital.
+
 **Purpose of this document:** every future stage/week of development pulls
 its model choices from (or explicitly extends) this list. It's not limited
 to what's already implemented in `module5-modelzoo` — that module currently
-uses only 5 of the entries below (XGBoost, DenseNet201, ResNet50,
-EfficientNet, U-Net). This document is the full menu.
+uses 5 entries that are now dated (XGBoost, DenseNet201, ResNet50,
+EfficientNet, U-Net). This document is the full menu, current generation.
 
 Two things every disease-specific pipeline needs, per the project's own
 framing ("a prediction a doctor can check, not a black box"):
 1. **A solution model** — something that outputs a diagnosis/risk/finding.
 2. **A reasoning/explainability method** — something that shows *why*.
 
-The catalog below is organized by data modality first (since that's how
-the router already dispatches), then a separate section for reasoning/XAI
-methods that layer on top of any of them, then frameworks/libraries, then
-disease-specific notes for the two you named plus general applicability.
+**A federation-specific caveat that applies throughout this document:**
+foundation models are typically hundreds of millions to billions of
+parameters. A hospital cannot realistically fine-tune all of one locally
+every round the way it can retrain a small CNN or XGBoost tree. The
+practical pattern used across every section below is:
+**freeze the foundation model → run it once per case as a feature
+extractor → federate only a small classifier/regression head on top of
+its embeddings.** That keeps FedAvg fast and keeps raw data local, while
+still getting foundation-model-quality representations. Where that's not
+the pattern, it's called out explicitly.
 
 ---
 
 ## 1. Imaging — classification (2D: X-ray, retina, skin, mammogram, etc.)
 
-| Model family | Notes | Good fit for |
-|---|---|---|
-| ResNet (18/50/101/152) | Already in zoo (ResNet50) | General-purpose backbone, retina, skin |
-| DenseNet (121/169/201) | Already in zoo (201) | Chest X-ray, dense feature reuse helps with subtle findings |
-| EfficientNet (B0-B7) | Already in zoo (B0) | Skin lesions; scales accuracy vs. compute cleanly |
-| Inception v3 / v4 | Named in original proposal alongside EfficientNet | Skin lesion, general classification |
-| VGG16/19 | Older, simple, still used as a baseline in medical imaging papers | Baselines, quick prototyping |
-| Vision Transformer (ViT) | Attention-based, needs more data/pretraining than CNNs | Large datasets, transfer from ImageNet-21k |
-| Swin Transformer | Hierarchical ViT variant, better than plain ViT on smaller datasets | Same use cases as ViT, more data-efficient |
-| ConvNeXt | Modernized CNN competing with ViT | General classification, strong modern baseline |
-| MobileNet (v2/v3) | Lightweight — runs on-device | Mobile/edge deployment at a hospital with weak hardware |
-| SqueezeNet | Very lightweight | Edge deployment, embedded diagnostic devices |
-| Capsule Networks (CapsNet) | Better at preserving spatial relationships than CNNs | Some published mammography/lung-nodule work |
-| Ensemble CNN (e.g. ResNet+DenseNet+EfficientNet voting) | Combine multiple imaging backbones for one modality | Boosting accuracy where a single model plateaus |
+| Model family | Status | Notes | Good fit for |
+|---|---|---|---|
+| **BiomedCLIP** | **Current** | Vision-language foundation model, contrastive-pretrained on ~15M biomedical image-text pairs from PubMed Central; produces embeddings usable zero-shot or with a lightweight fine-tuned head | General biomedical image classification across modalities, good default starting point |
+| **CheXzero** | **Current** | Contrastive pretraining directly on MIMIC-CXR image-report pairs; demonstrated radiologist-level zero-shot multi-label chest pathology classification without explicit annotations | Chest X-ray, when labeled data per hospital is scarce |
+| **CXRBase** | **Current** | Masked-autoencoder self-supervised foundation model trained on 1M+ unlabeled CXR images, then fine-tuned for disease classification/localization | Chest X-ray, when you have volume of *unlabeled* local images plus a smaller labeled set |
+| **MedGemma** | **Current** | Google's open-weight multimodal medical foundation model (image + text); can be self-hosted, which matters for a hospital-local deployment | General-purpose medical image reasoning + generating the "why" narrative in one model |
+| ResNet50 / DenseNet201 / EfficientNet (ImageNet-pretrained) | **Legacy — still usable as a baseline, not SOTA** | This is what's currently in `module5-modelzoo`. Fine as a fast, cheap, well-understood fallback; foundation-model embeddings now consistently outperform ImageNet transfer learning on medical images specifically, since ImageNet's photos are a poor match for medical image statistics | Keep as the "torch not installed / low-resource hospital" fallback tier, not the primary path |
+| ViT / Swin Transformer / ConvNeXt | **Legacy backbone, still fine when foundation-model-pretrained** | The architecture itself isn't obsolete — it's *what it was pretrained on* that matters now. A Swin/ViT backbone pretrained via a medical foundation-model recipe (e.g. the ones above) is current; the same architecture pretrained only on ImageNet is not | Use as the underlying architecture *inside* a foundation model, not standalone |
+| MobileNet / SqueezeNet | **Still current for its niche** | Nothing newer displaces these for genuinely constrained edge hardware | On-device/edge deployment at a low-resource hospital site |
+| Inception v3/v4, VGG16/19, Capsule Networks | **Outdated — remove** | Superseded on essentially every benchmark by the above; keep only if a specific published baseline comparison requires them | — |
 
 ## 2. Imaging — segmentation (tumor/organ boundaries, lesion outlines)
 
-| Model family | Notes | Good fit for |
-|---|---|---|
-| U-Net | Already in zoo (custom) | General medical segmentation gold standard |
-| U-Net++ | Nested skip connections, improves on vanilla U-Net | Finer boundary detection |
-| Attention U-Net | Adds attention gates to skip connections | Focusing on small/subtle lesions |
-| V-Net | 3D variant of U-Net | Volumetric CT/MRI segmentation |
-| Mask R-CNN | Instance segmentation (separates multiple objects, not just a mask) | Counting/segmenting multiple nodules or cells in one image |
-| DeepLab (v3/v3+) | Atrous/dilated convolutions for multi-scale context | Organ segmentation, histopathology region segmentation |
-| nnU-Net | Self-configuring U-Net framework, widely used in medical imaging competitions | When you want a strong segmentation baseline with minimal tuning |
-| SAM (Segment Anything Model) / MedSAM | Foundation segmentation model fine-tuned for medical images | Rapid prototyping segmentation with less labeled data |
+| Model family | Status | Notes | Good fit for |
+|---|---|---|---|
+| **SAM2 / MedSAM2** | **Current** | Meta's Segment Anything Model 2, fine-tuned for medical volumes; treats a 3D scan as a "video" and propagates a single prompt through the volume — dramatically fewer labels needed than U-Net-family training | Volumetric CT/MRI segmentation with limited per-hospital labeled masks; interactive clinician-in-the-loop correction |
+| **nnU-Net** | **Current — still the gold-standard baseline** | Not obsolete: 2026 papers keep finding it competitive with or beating out-of-the-box SAM2 on task-specific, well-labeled datasets. Self-configuring — picks its own architecture/preprocessing per dataset | Default when a hospital has a reasonably sized labeled segmentation dataset for one specific task |
+| Attention U-Net, V-Net, U-Net++ | **Legacy — nnU-Net supersedes these as a default choice** | Individually still published/used, but nnU-Net's auto-configuration generally reaches the same or better results with less manual tuning | Keep only for specific architectures a paper you're replicating requires |
+| Mask R-CNN, DeepLab v3/v3+ | **Outdated for medical segmentation specifically** | Still fine for general computer vision; medical segmentation work has moved to the nnU-Net/SAM2 axis | — |
+| Vanilla U-Net (custom, currently in zoo) | **Legacy — matches your current `imaging_segmentation.py`** | Reasonable teaching/baseline implementation; swap for nnU-Net or MedSAM2 for a real accuracy jump | Keep as the no-dependency fallback tier |
 
-## 3. Whole-slide / histopathology imaging (relevant directly to breast cancer, leukemia blood smears)
+## 3. Whole-slide / histopathology imaging (breast cancer, leukemia blood smears)
 
-| Model family | Notes | Good fit for |
-|---|---|---|
-| Multiple Instance Learning (MIL / CLAM) | Handles gigapixel whole-slide images without patch-level labels | Breast cancer histopathology (e.g. BACH, CAMELYON datasets), any biopsy slide diagnosis |
-| Patch-based CNN + aggregation | Split slide into patches, classify each, aggregate | Simpler alternative to full MIL pipelines |
-| Graph Neural Networks (GNN) on cell graphs | Model spatial relationships between cells/nuclei | Tumor microenvironment analysis, cell-interaction reasoning |
-| HoVer-Net | Nucleus segmentation + classification in one model | Counting/classifying cell types in blood smears (leukemia) or tissue |
-| Cellpose / StarDist | Cell/nucleus segmentation specifically | Blood smear cell counting and morphology (leukemia diagnosis workflows) |
+| Model family | Status | Notes | Good fit for |
+|---|---|---|---|
+| **UNI (v2)** | **Current** | Pathology foundation model, self-supervised on 200M+ image patches from 350K+ whole-slide images (Mass General Brigham) | General-purpose histopathology feature extraction, any tissue type |
+| **Virchow2** | **Current** | Trained on 3.1M whole-slide images (Memorial Sloan Kettering); one of the largest pathology foundation models published | Same use cases as UNI; strong alternative/ensemble partner |
+| **Prov-GigaPath** | **Current** | Trained on 1.3B patches from 171K+ slides (Providence health system) | Same tier as UNI/Virchow2 |
+| **CONCH** | **Current** | Vision-*language* pathology foundation model (image-caption pairs from PubMed) — lets you query slide regions with text, not just classify | When you want text-grounded reasoning over a slide, not just a label |
+| Multiple Instance Learning (MIL/CLAM) on **foundation-model embeddings** | **Current pattern** | This is how you actually use the four models above in a diagnostic pipeline: extract patch embeddings with UNI/Virchow2/Prov-GigaPath, then train a small MIL aggregator (CLAM-style) on top — that MIL head is what federates cheaply | Breast cancer histopathology (BACH, CAMELYON), any whole-slide diagnosis |
+| MIL/CLAM on raw patch-CNN features | **Legacy** | Same architecture, weaker feature extractor underneath; foundation-model embeddings measurably outperform ImageNet-CNN patch features on pathology benchmarks | Fallback only if none of the above foundation models are accessible |
+| HoVer-Net, Cellpose, StarDist | **Still current for their specific niche** | Nucleus/cell segmentation hasn't been fully subsumed by the slide-level foundation models above — those work at the tile/embedding level, not per-cell | Blood smear cell counting/morphology (leukemia), nucleus-level analysis |
+| Graph Neural Networks on cell graphs | **Still current, complementary** | Still the right tool for explicit spatial/relational reasoning between cells, independent of the foundation-model shift above | Tumor microenvironment / cell-interaction reasoning |
 
 ## 4. Structured / tabular data (vitals, labs, EHR structured fields)
 
-| Model family | Notes | Good fit for |
-|---|---|---|
-| XGBoost | Already in zoo | General tabular clinical prediction |
-| LightGBM | Faster on large tabular data, already in requirements.txt (unused yet) | Larger EHR tabular datasets |
-| CatBoost | Handles categorical features natively without manual encoding | EHR data with many categorical fields (diagnosis codes, med names) |
-| Random Forest | Simple, robust, easy to explain via feature importance | Baseline models, smaller datasets |
-| Logistic Regression / SGDClassifier | Already used in module3 (federated) | Simple, interpretable, federation-friendly baseline |
-| Support Vector Machine (SVM) | Strong on small-to-medium, high-dimensional tabular/genomic data | Gene-expression classification, small clinical cohorts |
-| TabNet | Deep learning architecture built specifically for tabular data with built-in feature attention | When you want a neural net that's still interpretable via attention masks |
-| Multi-Layer Perceptron (MLP) | Simple neural net baseline | Structured data when boosting isn't preferred |
+| Model family | Status | Notes | Good fit for |
+|---|---|---|---|
+| **TabPFN v2 / v2.5** | **Current** | Transformer-based tabular *foundation* model — pretrained once on synthetic tasks, then does in-context learning: no per-hospital training loop needed, just feed the local table at inference time. v2.5 handles up to ~100K rows and ~2,000 features, which fits a hospital's vitals dataset comfortably. On small-to-medium clinical tabular data, it now matches or beats tuned XGBoost | Small-to-medium tabular clinical cohorts — exactly FedHeal's structured-vitals track; also strong on missing-data imputation |
+| XGBoost / LightGBM / CatBoost | **Still current, not obsolete** | Gradient-boosted trees remain the state of practice at larger scale and are what most production clinical tabular systems still run; the shift is that they're no longer the *only* strong option | Larger tabular datasets, or as an ensemble partner alongside TabPFN |
+| **TabICL v2** | **Current, complementary to TabPFN** | Another 2026 tabular foundation model, optimized for scaling to larger row counts than TabPFN handles well | If a hospital's vitals table grows past TabPFN's practical row/feature ceiling |
+| Random Forest, Logistic Regression / SGDClassifier | **Still current as interpretable baselines** | Not "outdated" — these remain the right choice specifically *because* they're simple to explain and federation-friendly (this is what `module3-fedlearning` already uses, correctly) | Baselines, and anywhere explainability-by-construction matters more than squeezing out extra accuracy |
+| TabNet, Support Vector Machine | **Legacy** | Both superseded in head-to-head benchmarks by tabular foundation models on the datasets they were designed for | Keep only if a specific paper/benchmark you're replicating requires them |
+| Multi-Layer Perceptron (MLP) baseline | **Legacy** | TabPFN/TabICL now dominate the "neural net on tabular data" niche this used to fill | — |
 
-## 5. Genomic / omics data (relevant directly to leukemia subtyping, breast cancer BRCA risk)
+## 5. Genomic / omics data (leukemia subtyping, breast cancer BRCA risk)
 
-| Model family | Notes | Good fit for |
-|---|---|---|
-| Random Forest / SVM on gene expression | Classic approach, still competitive on small-N high-dimensional omics data | Leukemia subtype classification from gene expression panels |
-| Autoencoders (for dimensionality reduction) | Compress high-dimensional omics data before feeding a classifier | Preprocessing genomic data for any downstream classifier |
-| Variational Autoencoders (VAE) | Same as above, plus generative capability | Data augmentation for rare genomic subtypes |
-| Graph Neural Networks on gene/protein interaction networks | Model biological pathway relationships | Reasoning about *why* a mutation matters (pathway-level explanation) |
-| Deep learning on multi-omics fusion (e.g. MOFA, DeepOmix-style architectures) | Combine genomics + transcriptomics + clinical data | Precision oncology risk scoring |
+| Model family | Status | Notes | Good fit for |
+|---|---|---|---|
+| **Evo 2** | **Current** | DNA foundation model (Arc Institute/NVIDIA, *Nature* 2026), trained on 9 trillion base pairs across all domains of life with a 1M-token context at single-nucleotide resolution — predicts functional impact of variants, including noncoding pathogenic mutations and clinically significant BRCA1 mutations, without task-specific fine-tuning | BRCA1/2 variant-effect prediction, noncoding variant interpretation — directly relevant to your breast-cancer disease track |
+| **AlphaGenome** | **Current** | DeepMind model, leads (alongside Evo 2) specifically on noncoding and splice variant-effect prediction | Splice-site and regulatory-region variant interpretation |
+| **AlphaMissense** | **Current** | The specialist leader for coding single-nucleotide-variant pathogenicity classification | Missense mutation pathogenicity scoring |
+| **AlphaFold3** | **Current** | Predicts near-complete biomolecular systems (protein–protein, protein–drug interactions) via a diffusion architecture — this is *mechanism*, not just variant calling: shows *how* a mutation disrupts protein function | Explaining the structural "why" behind a genomic finding, drug-target discovery |
+| Random Forest / SVM on gene-expression panels | **Still viable for small-N cohorts** | Genomic foundation models above need real compute and aren't yet the easy/cheap option for a small leukemia subtype cohort; classic approaches remain competitive there and are far cheaper to run | Small-N leukemia subtype classification from expression panels, when compute is constrained |
+| Autoencoders / VAEs for dimensionality reduction | **Legacy pattern, mostly superseded** | Foundation model embeddings (from the models above) now typically serve the same "compress high-dim omics data" role, with better downstream performance | Keep only where no foundation model embedding is accessible for that omics type |
+| Graph Neural Networks on gene/protein interaction networks | **Still current, complementary** | Independent of the foundation-model shift — still the right tool for explicit pathway-level reasoning | Explaining *why* a mutation matters at the pathway level, alongside AlphaFold3's structural view |
 
 ## 6. Clinical text / NLP (doctor's notes, radiology reports, discharge summaries)
 
-| Model family | Notes | Good fit for |
-|---|---|---|
-| ClinicalBERT | BERT pretrained on clinical notes (MIMIC-III) | Extracting structured info from unstructured clinical notes |
-| BioBERT | BERT pretrained on biomedical literature (PubMed) | Biomedical entity recognition, literature-grounded reasoning |
-| BlueBERT | Pretrained on PubMed + MIMIC-III combined | Mixed biomedical + clinical text tasks |
-| Named Entity Recognition (NER) models (spaCy sci/med models, MedCAT) | Extract symptoms/diagnoses/medications from free text | Turning unstructured notes into structured features for Module 2 |
-| GPT-style clinical LLMs (e.g. fine-tuned open models) | Summarization, report generation, reasoning over combined text+structured data | Generating the "reasoning" narrative a clinician reads alongside a prediction |
+| Model family | Status | Notes | Good fit for |
+|---|---|---|---|
+| **MedGemma** | **Current** | Google's open-weight clinical multimodal foundation model — self-hostable, which is what makes it usable inside a hospital-local, privacy-preserving deployment like FedHeal (no data leaves the building to hit an API) | Report summarization, extracting structured findings, generating the clinician-facing "reasoning" narrative |
+| **Med-PaLM 2 / AMIE** | **Current, but research-tier** | Strong published benchmarks; still no FDA clearance and no confirmed general hospital deployment as of this writing — treat as a research reference point, not a production dependency | Benchmarking against, not necessarily building on directly (API-only, not self-hostable) |
+| Reasoning-model-assisted diagnosis (e.g. an o3-class model doing structured differential reasoning over a case) | **Emerging/current** | A 2026 *NEJM AI* study used this pattern on unsolved rare-disease genomic cases as a diagnostic aid, not a standalone tool | Rare/undiagnosed-disease differential generation, paired with clinician review |
+| ClinicalBERT, BioBERT, BlueBERT | **Legacy — still functional, not the current default** | These BERT-era encoders still work for entity extraction, but generative clinical LLMs (MedGemma and open alternatives) now generally subsume their use cases while also producing the natural-language "reasoning" the project needs — a pure encoder can't generate that narrative | Keep specifically for lightweight NER where you don't need any generation, and compute is very constrained |
+| spaCy sci/med models, MedCAT | **Still current for their niche** | Fast, cheap, no GPU needed — nothing has displaced these for pure structured-field extraction at scale | Turning free text into structured fields for Module 2's validation layer |
 
 ## 7. Time-series / sequential EHR data
 
-| Model family | Notes | Good fit for |
-|---|---|---|
-| LSTM / GRU | Classic sequence models | Modeling vitals over time, admission trajectories |
-| Temporal Convolutional Networks (TCN) | Convolution-based alternative to RNNs, often faster to train | Same use cases as LSTM/GRU |
-| Transformer-based EHR models (e.g. BEHRT, Med-BERT) | Attention over sequences of clinical events/codes | Predicting future risk from a patient's full visit history |
+| Model family | Status | Notes | Good fit for |
+|---|---|---|---|
+| **TabPFN (as a time-series tool)** | **Current, notable 2025/2026 finding** | Recent work found the tabular foundation model TabPFN, applied to simple time-series features, outperforms specialized time-series forecasting models on several benchmarks — a genuinely surprising, current result worth knowing | Vitals-over-time forecasting, when you'd otherwise reach for a dedicated time-series model |
+| Transformer EHR models (BEHRT, Med-BERT) | **Still current** | Attention-over-visit-history models haven't been displaced, just joined by the tabular-foundation-model option above | Predicting future risk from a patient's full visit/event history |
+| LSTM / GRU, Temporal Convolutional Networks | **Legacy** | Transformer-based sequence models (above) now generally outperform these on EHR event-sequence tasks | Keep only as a lightweight fallback with no GPU/transformer library available |
 
 ## 8. Survival analysis (time-to-event: relapse, progression, mortality)
 
-| Model family | Notes | Good fit for |
+| Model family | Status | Notes | Good fit for |
+|---|---|---|---|
+| Cox Proportional Hazards | **Still current** | Genuinely not outdated — remains the standard baseline in clinical survival literature, precisely because it's interpretable and well-understood by clinicians/regulators | Baseline survival/prognosis modeling |
+| Random Survival Forest, DeepSurv | **Still current** | No major foundation-model shift has displaced this field yet the way imaging/genomics/tabular have | More complex prognosis modeling than Cox alone |
+| Kaplan-Meier estimation | **Still current** | Descriptive, not predictive — still the standard reporting companion to any of the above | Baseline/reporting alongside any survival model |
+
+*(This section is the one place in the catalog with no "outdated → replace" entries — survival analysis hasn't had the same foundation-model disruption as imaging/genomics/tabular yet.)*
+
+## 9. Multi-modal fusion (imaging + tabular + genomic + text, one patient)
+
+| Approach | Status | Notes |
 |---|---|---|
-| Cox Proportional Hazards | Classic statistical survival model | Baseline survival/prognosis modeling, still standard in clinical papers |
-| Random Survival Forest | Tree-based survival model, handles nonlinearity | More complex prognosis modeling than Cox alone |
-| DeepSurv | Neural-network extension of Cox PH | When you have enough data to justify a deep model for prognosis |
-| Kaplan-Meier estimation | Non-parametric, used for descriptive survival curves, not prediction per se | Baseline/reporting alongside any of the above |
-
-## 9. Multi-modal fusion (combining imaging + tabular + genomic + text for one patient)
-
-| Approach | Notes |
-|---|---|
-| Late fusion (current `fusion.py` approach) | Each modality's model runs independently, combine outputs/scores at the end — simplest, most interpretable |
-| Early fusion | Concatenate raw/embedded features from each modality before one shared model — needs aligned data |
-| Intermediate/joint embedding fusion | Each modality has its own encoder producing an embedding; a shared layer combines embeddings (not raw outputs) | More expressive than late fusion, harder to train/explain |
-| Attention-based multi-modal fusion (e.g. cross-modal attention transformers) | Lets the model learn which modality matters most per case | State-of-the-art multi-modal medical AI, needs more data |
+| **Native multimodal foundation models (MedGemma, CONCH)** | **Current** | These fuse modalities *by design* inside one model rather than combining separately-trained specialists after the fact — the current state of the art for multi-modal medical AI |
+| Attention-based cross-modal fusion (custom transformer combining separate encoders) | **Current, when you need custom modality combinations** | Still the right DIY approach when no single foundation model covers your exact combination of modalities |
+| Late fusion (your current `fusion.py` approach) | **Legacy pattern — but keep it** | Simplest, most interpretable, and still defensible specifically *because* FedHeal's whole pitch is "a checkable second opinion, not a black box." Don't discard this for the sake of being current — it's a legitimate design choice, not just an outdated one |
+| Early fusion (raw feature concatenation) | **Outdated** | Generally underperforms both late fusion and embedding-level fusion; rarely used anymore | — |
 
 ---
 
 ## 10. Reasoning / Explainability (the "why," not just the "what")
 
-This is the category most directly tied to your requirement that the AI
-find both **solution and reason**. These layer on top of any model above.
+This category has aged less than the "solution model" categories above —
+it's method-level, not architecture-level, so most of it remains current.
+One genuinely new addition:
 
-| Method | Explains | Good fit for |
+| Method | Status | Explains | Good fit for |
+|---|---|---|---|
+| **LLM-generated natural-language rationale** (e.g. MedGemma or a reasoning model producing a written differential) | **New since original catalog** | A readable clinical explanation, not just an attribution map or feature score | Turning any of the above predictions into the kind of narrative a clinician actually reads, rather than a heatmap alone |
+| Grad-CAM / Grad-CAM++ | **Still current** | Which pixels/regions drove an image model's decision | Imaging specialists — still the standard first choice |
+| SHAP | **Still current** | Per-feature contribution, any tabular/some deep models | Explaining XGBoost/LightGBM/TabPFN vitals predictions |
+| LIME | **Still current** | Local, model-agnostic explanation | Quick explanations for any black-box model |
+| Integrated Gradients | **Still current** | Theoretically grounded deep-net attribution | Imaging and text models |
+| Attention visualization | **Still current** | What a transformer focused on | ViT, Swin, BEHRT-style models, and now MedGemma/CONCH |
+| Counterfactual explanation | **Still current** | "What would need to change for the prediction to flip?" | Borderline cases, actionable clinician-facing framing |
+| Causal inference (DoWhy, do-calculus) | **Still current** | Distinguishes correlation from causation | Deeper reasoning than pattern-matching |
+| Bayesian Networks | **Still current** | Explicit probabilistic cause-effect reasoning | Traceable diagnostic reasoning chains |
+| Knowledge graphs + ontologies (SNOMED CT, ICD-10, UMLS) | **Still current** | Grounds a prediction in formal medical knowledge | Linking a finding to diagnostic criteria |
+| Rule-based / expert systems | **Still current** | Fully transparent, human-authored logic | Auditable logic where regulators require it |
+
+---
+
+## 11. Frameworks / libraries
+
+| Framework | Status | Role |
 |---|---|---|
-| Grad-CAM / Grad-CAM++ | Which pixels/regions drove an image model's decision | Already planned in the proposal for the imaging specialists |
-| SHAP (SHapley Additive exPlanations) | Per-feature contribution to any model's output (tabular, genomic, even some deep models) | Explaining XGBoost/LightGBM vitals predictions — already partially done via `feature_importances_` in `tabular_vitals.py`, SHAP is the more rigorous version |
-| LIME | Local, model-agnostic explanation by perturbing inputs | Quick explanations for any black-box model, imaging or tabular |
-| Integrated Gradients | Attribution method for deep nets, more theoretically grounded than raw saliency maps | Imaging and text models alike |
-| Attention visualization | Show what a transformer/attention-based model focused on | ViT, Swin, BEHRT, ClinicalBERT-style models |
-| Counterfactual explanation | "What would need to change for the prediction to flip?" | Explaining borderline cases to clinicians in actionable terms |
-| Causal inference models (e.g. causal graphs, do-calculus, DoWhy library) | Distinguish correlation from causation in risk factors | Deeper "reasoning" than pattern-matching — e.g. does a factor actually cause the outcome |
-| Bayesian Networks | Explicit probabilistic reasoning over cause-effect relationships between symptoms/findings | Diagnostic reasoning chains a clinician can trace step by step |
-| Knowledge graphs + medical ontologies (SNOMED CT, ICD-10, UMLS) | Ground a prediction in structured medical knowledge, not just learned statistics | Linking a finding to formal diagnostic criteria, supporting the "reason" requirement directly |
-| Rule-based / expert systems (e.g. clinical decision rules encoded explicitly) | Fully transparent, human-authored reasoning | Combining with ML for cases where regulators/clinicians need auditable logic, not just a statistical model |
+| PyTorch | **Current** | Core deep learning — still the right choice; nothing has displaced it |
+| **Hugging Face `transformers` + `timm`** | **Current, now the primary way to load foundation models** | This is how you'd actually pull in BiomedCLIP, MedGemma, UNI, Virchow2, CONCH etc. rather than hand-building architectures — most of Section 1–6's current-tier models ship as HF-loadable weights |
+| **`tabpfn` / `tabpfn-extensions`** | **New, current** | The library for TabPFN v2/v2.5 — pip-installable, no GPU strictly required for smaller tables |
+| MONAI | **Current** | Medical-imaging-specific PyTorch framework — still the right layer for nnU-Net-style segmentation pipelines and preprocessing |
+| SHAP, Captum | **Current** | Explainability — unchanged |
+| DoWhy / EconML | **Current** | Causal inference — unchanged |
+| DGL / PyTorch Geometric | **Current** | Graph Neural Networks — unchanged |
+| Flower (flwr) | **Current** | Federation layer — unchanged, and note it applies just as well to "federate a small head on top of frozen foundation-model embeddings," which is the pattern most sections above actually need |
+| MLflow | **Current** | Experiment tracking |
+| Hugging Face Transformers (for ClinicalBERT/BioBERT specifically) | **Legacy use case** | Still works, just superseded as the default choice by generative clinical LLMs for most of Section 6's use cases |
 
 ---
 
-## 11. Frameworks / libraries (beyond what's already used)
-
-| Framework | Role |
-|---|---|
-| PyTorch / TensorFlow | Already in use (PyTorch) — core deep learning |
-| **MONAI** | Medical-imaging-specific framework built on PyTorch — pre-built transforms, losses, and models tuned for medical images (segmentation, classification). Worth adopting instead of raw torchvision for the imaging specialists. |
-| Hugging Face Transformers | For ClinicalBERT/BioBERT/BlueBERT and any clinical NLP work |
-| scikit-survival | Survival analysis models (Cox PH, Random Survival Forest) in a scikit-learn-compatible API |
-| SHAP (library) | Explainability, works with XGBoost/LightGBM/sklearn/some deep models |
-| Captum | PyTorch's official interpretability library (Grad-CAM, Integrated Gradients, attention viz) |
-| DoWhy / EconML | Causal inference libraries |
-| DGL / PyTorch Geometric | Graph Neural Network libraries — for cell graphs, gene/protein interaction networks |
-| Cellpose / StarDist (as libraries) | Pretrained cell/nucleus segmentation, usable directly or fine-tuned |
-| Flower (flwr) | Already in use — federation layer, applies to ANY of the models above, not just XGBoost/logistic regression |
-| MLflow | Experiment tracking across all these models as the model zoo grows |
-
----
-
-## 12. Disease-specific notes
+## 12. Disease-specific notes (updated)
 
 ### Breast cancer
-- **Mammography imaging**: EfficientNet/ResNet/DenseNet classification, or dedicated breast-imaging architectures from published work (e.g. models trained on CBIS-DDSM, INbreast datasets).
-- **Histopathology (biopsy slides)**: MIL/CLAM on whole-slide images (BACH, CAMELYON16/17 datasets) — this is a strong candidate for a new specialist in the zoo, distinct from the current imaging models which are all single-image classifiers, not gigapixel slide handlers.
-- **Genomic risk (BRCA1/2, gene expression subtyping)**: Random Forest/SVM/autoencoder-based approaches on gene expression panels (e.g. METABRIC dataset).
-- **Reasoning layer**: Grad-CAM on the imaging side, SHAP on any tabular risk-factor model, knowledge-graph grounding against BRCA/oncology ontologies for the genomic side.
+- **Mammography imaging**: BiomedCLIP or CXRBase-style foundation embeddings + a lightweight fine-tuned head, in place of standalone EfficientNet/ResNet/DenseNet classification.
+- **Histopathology (biopsy slides)**: UNI(v2)/Virchow2/Prov-GigaPath embeddings feeding a CLAM-style MIL head — this is the clearest upgrade path in the whole catalog, since your current zoo has no gigapixel whole-slide capability at all yet.
+- **Genomic risk (BRCA1/2)**: Evo 2 and AlphaMissense for variant-effect prediction, AlphaFold3 for structural consequence — replaces Random Forest/SVM/autoencoder-on-expression as the primary method, with the classic approach kept as a cheap fallback for small cohorts.
+- **Reasoning layer**: Grad-CAM (imaging) + SHAP (tabular) unchanged; add AlphaFold3's structural view and an LLM-generated narrative (MedGemma) as new reasoning outputs.
 
 ### Leukemia
-- **Blood smear microscopy**: CNN classification (white blood cell type/morphology) — HoVer-Net or Cellpose for individual cell segmentation before classification, since leukemia diagnosis is fundamentally about cell counts/morphology, not whole-image classification.
-- **Flow cytometry data**: Structured/tabular models (XGBoost, Random Forest) on flow cytometry marker panels.
-- **Cytogenetics / gene expression subtyping**: Same genomic approaches as breast cancer's genomic section — Random Forest/SVM/autoencoders on expression data, since leukemia subtypes (e.g. ALL vs AML, further molecular subtypes) are heavily gene-expression-driven.
-- **Reasoning layer**: Cell-level segmentation + count outputs are inherently more interpretable than a single "cancer/no cancer" label; layer SHAP on top of the tabular/genomic classifiers.
+- **Blood smear microscopy**: HoVer-Net/Cellpose for cell segmentation is *still current* — pair it with a foundation-model-embedding classifier for cell-type/morphology instead of a standalone CNN.
+- **Flow cytometry**: TabPFN v2 in place of, or alongside, XGBoost/Random Forest on marker panels.
+- **Cytogenetics / gene expression subtyping**: same genomic foundation-model upgrade path as breast cancer's genomic section.
+- **Reasoning layer**: cell-level segmentation output stays inherently interpretable; layer SHAP on the tabular/genomic classifiers as before.
 
 ### General applicability (diseases not named yet)
-The catalog above is intentionally organized by **data modality and task type**, not by disease, precisely so it generalizes: any new disease request maps to "what data do we have" (imaging? tabular? genomic? text? time-series?) and "what do we need" (classification? segmentation? survival/prognosis? risk score?) — then the router pulls the matching model family from this document, and a reasoning method from Section 10 gets attached. New diseases should extend this table, not require a new document.
+Same principle as before, now with the foundation-model pattern folded in:
+map the disease to a data modality (imaging/tabular/genomic/text/time-series),
+pick the **current-tier** model from that section as the default (not the
+legacy one), pick a reasoning method from Section 10, and register it in
+`module5-modelzoo/registry.py`. The legacy models stay in this document as
+documented fallbacks, not because they're wrong, but because low-resource
+hospital sites without GPU/foundation-model access still need something
+that runs.
 
 ---
+
+## What's actually outdated *in your running code right now*
+
+Everything above is the reference menu. This is the direct answer to
+"remove outdated models" for what's actually implemented today:
+
+| Currently in `module5-modelzoo` | Verdict | Swap to | Effort |
+|---|---|---|---|
+| `XGBoostVitalsModel` (tabular) | Not wrong, but no longer the strongest option | Add `TabPFN v2` as an alternative/default | **Low** — pip-installable, no GPU needed, drop-in on the same `SpecialistModel` interface |
+| `DenseNet201ChestXrayModel` | Legacy | `BiomedCLIP` or `CXRBase` embedding + head | **Medium** — needs HF `transformers`, a fine-tuning pass, no gated-weight approval needed |
+| `ResNet50RetinaModel` | Legacy | `BiomedCLIP` embedding + head | **Medium** — same pattern as above |
+| `EfficientNetSkinLesionModel` | Legacy | `BiomedCLIP` embedding + head | **Medium** — same pattern |
+| `UNetSegmentationModel` | Legacy but reasonable fallback | `nnU-Net` (if labeled data is decent) or `MedSAM2` (if labels are scarce) | **Medium-High** — nnU-Net is a bigger framework swap; MedSAM2 needs Meta's SAM2 checkpoint |
+| *(missing entirely)* | Gap, not outdated | Histopathology track (UNI/Virchow2/CONCH + MIL) | **New build** — you have no whole-slide specialist at all yet, and it's the single biggest upgrade for the breast-cancer track specifically |
+| *(missing entirely)* | Gap, not outdated | Genomic variant track (Evo 2 / AlphaMissense / AlphaGenome) | **New build** — directly relevant to your named BRCA1/2 and leukemia-cytogenetics use cases |
 
 ## How this gets used going forward
 
 When a future stage asks for a new disease/specialist:
 1. Identify the data modality (imaging/tabular/genomic/text/time-series) from the sections above.
-2. Pick a solution model from the matching section (default to what's already in the zoo — ResNet/DenseNet/EfficientNet/U-Net/XGBoost — unless the disease specifically calls for something else, like MIL for histopathology or a survival model for prognosis).
+2. Pick a **current-tier** solution model from the matching section as the default; fall back to the legacy tier only for low-resource deployments.
 3. Pick a reasoning/explainability method from Section 10 to pair with it.
-4. Register it in `module5-modelzoo/registry.py` following the existing `SpecialistModel` pattern — nothing about the router or fusion layer needs to change.
+4. Register it in `module5-modelzoo/registry.py` following the existing `SpecialistModel` pattern — nothing about the router or fusion layer needs to change, including for foundation-model-backed specialists (they still just implement `predict()`).
