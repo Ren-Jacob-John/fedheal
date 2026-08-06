@@ -8,6 +8,189 @@ following the build order from the project proposal:
 3. Local training (XGBoost/logistic regression) + Flower federated loop across simulated hospitals
 4. Dashboard wired to show login + training/round status
 
+## Problem Statement
+
+Modern healthcare AI needs large, diverse patient datasets to build models
+that generalize well — a model trained on one hospital's patients often
+performs poorly on another hospital's population. The obvious fix,
+pooling every hospital's raw patient records onto one central server, is
+blocked in practice for good reasons:
+
+- **Privacy & legal risk** — regulations such as HIPAA/GDPR and hospital
+  data-governance policies generally forbid moving identifiable patient
+  data outside the institution that collected it.
+- **Data silos** — each hospital's data stays locked inside its own
+  systems, so no single institution (especially a small or rural one) has
+  enough data on its own to train an accurate, generalizable model.
+- **Data quality is uneven** — different hospitals use different
+  equipment, units, and data-entry practices, so raw uploads can contain
+  unit mismatches, out-of-range values, or outliers that silently corrupt
+  a shared model if they aren't caught before training.
+- **One-size-fits-all models don't work in medicine** — a chest X-ray
+  needs a different model than a table of vital signs, which needs a
+  different model than a genomic panel, so a real clinical AI platform
+  has to intelligently route each case to the right specialist model(s).
+
+**In short: how do you let many hospitals collaboratively train an
+accurate, shared diagnostic AI model without any hospital's patient data
+ever leaving its own servers?**
+
+## Solution
+
+FedHeal is a **federated learning platform for healthcare**, built as
+seven cooperating modules that together implement the full pipeline from
+hospital login to a continuously improving shared model:
+
+1. **Authentication & multi-tenancy** (`module1-auth/`) — every hospital
+   gets its own isolated login; a signed JWT (not a client-supplied value)
+   is the only thing any other module trusts to know which hospital a
+   request belongs to.
+2. **Data ingestion & validation** (`module2-validation/`) — a five-stage
+   gate (de-identification screen, schema validation, plausibility-range
+   checks, cross-field consistency checks, batch-level outlier detection)
+   that a hospital's uploaded data must pass before it can influence the
+   shared model.
+3. **Local training + federated aggregation** (`module3-fedlearning/`) —
+   each hospital trains a model on only its own local data; only the
+   learned model weights (never raw patient records) are sent to a
+   central process that averages them (**Federated Averaging / FedAvg**)
+   into one improved global model, which is then sent back out for
+   another round.
+4. **Hospital dashboard** (`module4-dashboard/`) — the interface a
+   clinician or hospital admin uses to log in, upload vitals, and see
+   their hospital's status and validated-record count.
+5. **Model zoo & task router** (`module5-modelzoo/`) — a library of
+   specialist models (one per data modality: vitals, chest X-ray, retina,
+   skin, segmentation) behind one common interface, with a router that
+   sends each case to the specialist actually built for it.
+6. **Condition router** (`module6-condition-router/`) — given a disease
+   name (e.g. "breast cancer", "leukemia"), automatically pulls in every
+   specialist model and every explanation method (SHAP, Grad-CAM,
+   knowledge-graph reasoning) that condition requires, instead of a human
+   having to wire that combination together by hand each time.
+7. **Admin / platform module** (`module7-admin/`) — the operator's
+   single view across the whole platform: which hospitals are active, is
+   the shared model actually improving round over round, and how much
+   data is being flagged for quality issues.
+
+## Importance to Society
+
+- **Better medicine for everyone, especially under-resourced hospitals.**
+  A small or rural hospital that could never collect enough data on its
+  own to train a reliable model benefits from a global model shaped by
+  every participating hospital's experience, without ever handing its
+  patients' records to anyone.
+- **Genuine patient privacy protection.** Because only model weights
+  (numbers), never patient records, ever leave a hospital, federated
+  learning removes the single biggest risk of centralized medical
+  datasets: a data breach exposing millions of patient records at once.
+- **Regulatory-friendly by design.** Keeping data at its source
+  institution aligns naturally with data-protection laws like HIPAA and
+  GDPR, instead of requiring hospitals to fight their own compliance
+  policies to participate in AI research.
+- **Safer AI in a life-critical domain.** The validation gate, the
+  "wrong specialist = confidently wrong answer" philosophy behind the
+  routers, and the explainability layer (SHAP, Grad-CAM, knowledge-graph
+  reasoning) all exist because a diagnostic system that is wrong silently
+  or unexplainably is dangerous in medicine in a way it isn't in most
+  other software.
+- **A template for cross-institution collaboration** more broadly — the
+  same architecture (isolate data, share only learned updates, validate
+  before training, explain every prediction) generalizes to any
+  privacy-sensitive, multi-party domain, not just hospitals.
+
+## Working Principle
+
+The system follows this end-to-end flow:
+
+1. A hospital user logs in through the **dashboard**; Module 1 verifies
+   their password and issues a JWT carrying their hospital ID and role —
+   every later step trusts *only* that token, never a client-supplied
+   hospital ID.
+2. The hospital uploads a batch of vitals records. Module 1 forwards them
+   to **Module 2**, which runs them through five checks in order
+   (de-identification → schema → plausibility ranges → cross-field
+   consistency → batch-level isolation-forest outlier detection) and
+   returns each record as `passed`, `flagged`, or `rejected`. Only
+   `passed` (and reviewed `flagged`) records are stored against that
+   hospital.
+3. When a federated training round starts, **Module 3** asks each
+   hospital's local `HospitalClient` to train on only its own validated
+   data, starting from the current shared model's weights. Each client
+   returns its *updated weights* — never the underlying patient data.
+4. A central aggregator averages all the hospitals' updated weights,
+   weighted by how much data each hospital trained on (**FedAvg**),
+   producing one improved global model. This repeats for a fixed number
+   of rounds, and the result is evaluated on a shared holdout set no
+   single hospital trained or tested on — the fair test of whether
+   federation actually helped versus each hospital training alone.
+5. For image- or condition-specific cases, **Module 5**'s router picks
+   the specialist model built for that data's modality, and **Module 6**'s
+   condition router expands a named disease into the full set of
+   specialist models *and* explanation methods it requires, rather than
+   guessing.
+6. **Module 7** ties it together for a platform operator: hospital
+   status, round-by-round accuracy history, and rolled-up (never
+   patient-level) data-quality flags, all in one view.
+
+## Algorithms & Frameworks Used
+
+| Layer | Algorithm / Model | Framework / Library |
+|---|---|---|
+| Federated coordination | **Federated Averaging (FedAvg)** across a non-IID (Dirichlet-partitioned) simulation of hospitals | [Flower](https://flower.dev/) (`server.py` reference implementation), scikit-learn |
+| Local/global model (tabular vitals) | Logistic regression (`SGDClassifier`) — chosen so weights are a simple flat array, easy to average correctly | scikit-learn |
+| Structured/tabular specialist | Gradient-boosted trees | XGBoost |
+| CBC / blood-count specialist (leukemia) | Gradient-boosted trees | LightGBM |
+| Genomic/expression classifier (breast cancer risk, leukemia subtyping) | Random Forest | scikit-learn |
+| Histopathology (whole-slide breast tissue) | Attention-based Multiple-Instance Learning (MIL) | PyTorch |
+| Chest X-ray classification | DenseNet201 (transfer learning) | PyTorch / torchvision |
+| Retinal disease grading | ResNet50 (transfer learning) | PyTorch / torchvision |
+| Skin lesion classification | EfficientNet-B0 (transfer learning) | PyTorch / torchvision |
+| Pixel-level image segmentation | Custom U-Net | PyTorch |
+| Batch-level anomaly detection | Isolation Forest | scikit-learn |
+| Explainability — tabular/tree models | SHAP (feature attribution) | SHAP |
+| Explainability — imaging models | Grad-CAM (pixel-level attribution) | PyTorch |
+| Explainability — clinical reasoning | Rule-based knowledge-graph reasoner (ICD-10-style codes, plain-language reasoning, suggested next steps) | Custom |
+| API services | REST APIs for auth, validation, admin | FastAPI, Pydantic, SQLAlchemy |
+| Auth & security | Password hashing, signed tokens | bcrypt, JWT |
+| Data storage | Relational database | PostgreSQL/Supabase (falls back to SQLite for local dev) |
+| Frontend | Hospital-facing dashboard | Plain HTML/JavaScript (`fetch` against Module 1's API) |
+
+See `docs/model-algorithm-catalog.md` for the full catalog of model
+families relevant to future disease specialists (imaging, tabular/EHR,
+genomic/omics, clinical NLP, time-series, survival analysis, multi-modal
+fusion, and additional explainability/reasoning methods).
+
+## Expected Outcome
+
+- A working, end-to-end federated learning pipeline in which multiple
+  simulated (and, via `simulate_real.py`, real-uploaded) hospitals train
+  a shared diagnostic model **without any hospital's raw patient data
+  leaving that hospital**.
+- A measurable, honest comparison — reported after every run — between
+  what each hospital's model could achieve training *alone* versus what
+  the *federated* global model achieves on a shared holdout set, directly
+  demonstrating federated learning's core value proposition (better
+  generalization through collaboration, without pooling data).
+- A validated, quality-gated data-ingestion pipeline that prevents
+  malformed or implausible hospital data from silently degrading the
+  shared model.
+- A multi-modal diagnostic platform that automatically routes any case —
+  by data type (Module 5) or by named disease (Module 6) — to the correct
+  specialist model(s) and produces a human-readable explanation
+  (SHAP / Grad-CAM / knowledge-graph reasoning) alongside every
+  prediction, rather than an unexplained black-box output.
+- A platform-operator view (Module 7) showing, at a glance, whether the
+  shared model is actually improving round over round and how healthy
+  each hospital's data quality is.
+- A foundation designed to graduate from this prototype toward
+  production: swapping the current logistic-regression baseline for the
+  XGBoost/PyTorch models already scaffolded in the model zoo, wiring a
+  real networked Flower server in place of the current single-process
+  simulation, and replacing today's rule-based placeholder outcome labels
+  with real clinical diagnosis/outcome labels once available — all
+  without changing the surrounding architecture.
+
 ## Documentation map
 
 - **`docs/16-week-development-plan.md`** — the full 16-week schedule this
