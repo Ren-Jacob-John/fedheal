@@ -18,6 +18,20 @@ from base import PredictionResult
 # How concerning each (modality, label) combination is, on a 0-1 scale.
 # Clinically reviewed values would replace these — these are illustrative
 # placeholders so the fusion math has something real to combine.
+#
+# Originally only covered module5's own modalities (vitals/chest_xray/
+# retina/skin/ct_scan). Module 6 added condition-specific specialists
+# reporting different modality strings (genomic/histopathology/cbc — see
+# module6-condition-router/models/*.py and condition_registry_builder.py
+# for the exact label sets), which had no entries here — every one of
+# their findings silently fell back to the "unknown label" neutral weight
+# below, so a fused score across e.g. genomic + histopathology findings
+# collapsed toward 0.5 regardless of actual severity. See
+# docs/module8-code-review-notes.md for how this was found. The values
+# below are placeholders in the same spirit as the rest of this table —
+# ordered so malignant/high-risk/AML-positive findings score higher than
+# their benign/low-risk counterparts — and still need clinical review
+# before this feeds any real fusion.
 SEVERITY_WEIGHTS: dict[tuple[str, str], float] = {
     ("vitals", "high_risk"): 0.8,
     ("vitals", "low_risk"): 0.1,
@@ -35,6 +49,15 @@ SEVERITY_WEIGHTS: dict[tuple[str, str], float] = {
     ("skin", "other"): 0.3,
     ("ct_scan", "region_flagged"): 0.7,
     ("ct_scan", "no_region_flagged"): 0.05,
+    # --- Module 6 condition-specific specialists (added with Module 8) ---
+    ("histopathology", "malignant"): 0.85,
+    ("histopathology", "benign"): 0.05,
+    ("genomic", "brca_high_risk"): 0.8,
+    ("genomic", "brca_low_risk"): 0.1,
+    ("genomic", "leukemia_subtype_aml"): 0.75,
+    ("genomic", "leukemia_subtype_all"): 0.75,
+    ("cbc", "leukemia_suspected"): 0.75,
+    ("cbc", "no_leukemia_suspected"): 0.05,
 }
 
 

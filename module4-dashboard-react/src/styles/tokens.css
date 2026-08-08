@@ -1,0 +1,52 @@
+/*
+  FedHeal — design tokens.
+
+  Direction: the whole point of this system is that patient data never
+  leaves a hospital — only *weights* travel, and only to one place. So the
+  UI is built as literal space: hospitals are bodies in orbit, the shared
+  model is the body they orbit, and a training round is a pulse of light
+  that goes in (as thin beams) and comes back out (as a broadcast ring).
+  Nothing here is a bar chart pretending to be a diagram.
+*/
+
+:root {
+  /* Color — deep clinical night sky, not "dark mode grey" */
+  --void: #060b14;
+  --void-soft: #0b1526;
+  --panel: rgba(14, 23, 40, 0.72);
+  --panel-solid: #0e1728;
+  --line: rgba(201, 214, 227, 0.14);
+  --line-strong: rgba(201, 214, 227, 0.28);
+
+  --ink: #dbe6f2;
+  --ink-dim: #7e93ab;
+  --ink-faint: #4c5c72;
+
+  --core: #eaf6ff;         /* the shared model */
+  --core-halo: #7fd8ff;
+  --teal: #2dd9c4;          /* healthy / ready / data-in-motion */
+  --teal-dim: #1c7f74;
+  --amber: #f5b342;         /* collecting data / attention */
+  --coral: #ff6f61;         /* inactive / rejected / danger */
+  --violet: #9b8cff;        /* specialist models / condition router */
+
+  /* Type */
+  --font-display: "Space Grotesk", "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+
+  --shadow-panel: 0 20px 60px rgba(0, 0, 0, 0.45);
+}

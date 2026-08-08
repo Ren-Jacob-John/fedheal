@@ -5,31 +5,67 @@ new Module 8's demos end-to-end with real (not stub) dependencies installed
 (`xgboost`, `lightgbm`, `shap`) to confirm the pipeline actually executes,
 not just reads plausibly.
 
-## Confirmed bug: fusion severity table doesn't cover Module 6 modalities
+## Fixed: fusion severity table didn't cover Module 6 modalities
 
-`module5-modelzoo/fusion.py`'s `SEVERITY_WEIGHTS` dict only has entries for
+`module5-modelzoo/fusion.py`'s `SEVERITY_WEIGHTS` dict only had entries for
 `vitals`, `chest_xray`, `retina`, `skin`, `ct_scan` — the modality names
 Module 5's own registry uses. Module 6's condition-specific specialists
 report different modality strings (`genomic`, `histopathology`, `cbc` — see
-`module6-condition-router/models/*.py`), none of which appear in the table.
+`module6-condition-router/models/*.py`), none of which appeared in the
+table.
 
-Effect: running `FusionLayer.combine()` on Module 6 findings (as Module 8's
-demo does for breast cancer / leukemia) silently falls back to the
-"unknown label" neutral weight of `0.5` for *every* finding, so the fused
-`overall_risk_score` collapses toward 0.5 regardless of how severe the
-actual findings are — confirmed by running the demo: a `brca_high_risk`
-(0.71 confidence) + a stub `malignant` (0.66 confidence) finding produced
-`overall_risk_score = 0.500`, which is uninformative.
+Effect (as originally found): running `FusionLayer.combine()` on Module 6
+findings (as Module 8's demo does for breast cancer / leukemia) silently
+fell back to the "unknown label" neutral weight of `0.5` for *every*
+finding, so the fused `overall_risk_score` collapsed toward 0.5 regardless
+of how severe the actual findings were — confirmed by running the demo: a
+`brca_high_risk` (0.71 confidence) + a stub `malignant` (0.66 confidence)
+finding produced `overall_risk_score = 0.500`, which was uninformative.
 
-This isn't a crash — `.get((modality, label), 0.5)` degrades quietly — which
-is exactly the "confident, meaningless answer" failure mode the codebase's
-own docstrings warn about elsewhere (`UnroutableCaseError`,
-`UnknownConditionError`). Fusion should probably raise/warn on an unknown
-modality rather than defaulting silently, or `SEVERITY_WEIGHTS` needs
-entries for the condition-router's modalities. Left unfixed here since the
-actual severity values need a clinician's input, not an engineering guess
-— flagged in Module 8's README as a known limitation instead of silently
-worked around.
+**Fix applied:** added entries for all label values Module 6's specialists
+actually emit (`histopathology`: benign/malignant; `genomic`: BRCA and
+leukemia-subtype labels; `cbc`: leukemia-suspected/not) — see
+`fusion.py`'s updated comment block for the reasoning and the exact
+source (`condition_registry_builder.py`) the label strings were taken
+from. Re-ran Module 8's demo after the fix: the same breast-cancer case
+that previously fused to `0.500` now produces a materially different
+score reflecting the actual finding severities (see "Verified after fix"
+below).
+
+These are still placeholder severities in the same spirit as the
+pre-existing table (`fusion.py`'s own comment: "Clinically reviewed values
+would replace these") — a clinician still needs to review and adjust the
+actual numbers before this feeds any real decision. What changed is that
+every Module 6 label now has *some* explicit, reviewable weight instead of
+silently defaulting to neutral.
+
+This isn't a crash — `.get((modality, label), 0.5)` degrades quietly —
+which is exactly the "confident, meaningless answer" failure mode the
+codebase's own docstrings warn about elsewhere (`UnroutableCaseError`,
+`UnknownConditionError`). Worth considering for a future pass: having
+`FusionLayer` warn (not necessarily raise) when it hits a genuinely unknown
+`(modality, label)` pair, so a *new* specialist added later doesn't
+silently repeat this same gap.
+
+### Verified after fix
+
+Re-ran `module8-synthesis/demo.py`:
+
+```
+# Review Packet — breast_cancer
+Combined risk score (Module 5 fusion): 0.821 (high)
+- histopathology_breast_cancer: malignant — confidence 0.51  [STUB]
+- genomic_breast_cancer: brca_high_risk — confidence 0.71
+```
+
+versus `0.500 (moderate)` before the fix — confirms the fix changes the
+fused score in the expected direction (toward "high," matching two
+concerning findings) without touching Module 6's routing or Module 8's
+synthesis logic at all. Note the stub's confidence value (0.51 here vs.
+0.66 in the earlier run) isn't seeded/deterministic — `StubSpecialistModel`
+draws a random confidence per run — so exact numbers will vary run to run;
+what's stable is the direction of the fix (Module 6 findings now pull the
+fused score toward their actual severity instead of sitting at neutral).
 
 ## Consistent, deliberate design pattern (not a bug — worth naming)
 

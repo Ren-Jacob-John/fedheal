@@ -56,9 +56,13 @@ hospital login to a continuously improving shared model:
    central process that averages them (**Federated Averaging / FedAvg**)
    into one improved global model, which is then sent back out for
    another round.
-4. **Hospital dashboard** (`module4-dashboard/`) — the interface a
+4. **Hospital dashboard** (`module4-dashboard/`, plain HTML/JS; a React
+   rebuild lives in `module4-dashboard-react/`) — the interface a
    clinician or hospital admin uses to log in, upload vitals, and see
-   their hospital's status and validated-record count.
+   their hospital's status and validated-record count. The React version
+   adds a spatial "federation map" — every hospital as a node in orbit
+   around the shared model, live status, and an architecture view of all
+   seven modules — see its own README for the design rationale.
 5. **Model zoo & task router** (`module5-modelzoo/`) — a library of
    specialist models (one per data modality: vitals, chest X-ray, retina,
    skin, segmentation) behind one common interface, with a router that
@@ -283,6 +287,10 @@ python simulate_real.py     # real hospital data — needs Module 1 + Module 2 r
 # Module 4 — Dashboard (no build step, just open it)
 cd module4-dashboard && python -m http.server 8080
 # then open http://localhost:8080
+
+# Module 4 (v2) — Federation Map, React (see module4-dashboard-react/README.md)
+cd module4-dashboard-react && npm install
+npm run dev          # http://localhost:5173
 
 # Module 7 — Admin/Platform service (start Module 1 first — it proxies to it)
 cd module7-admin && pip install -r requirements.txt --break-system-packages

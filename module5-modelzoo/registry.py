@@ -33,6 +33,40 @@ except (ImportError, OSError):
     RETINA_CLASSES = ["no_dr", "mild", "moderate", "severe", "proliferative_dr"]
     SKIN_CLASSES = ["benign_nevus", "melanoma", "basal_cell_carcinoma", "other"]
 
+# --- SOTA foundation-model specialists (see docs/foundation-models-status.md) ---
+# None of these have their real dependencies/weights available in this
+# sandbox (no huggingface.co network access, no GPU) — every one degrades
+# to StubSpecialistModel exactly like the imaging specialists above.
+# RadFM additionally raises NotImplementedError even when its repo *is*
+# importable, since its predict() is deliberately left unwritten pending
+# a real checkpoint to validate the generation loop against — see
+# foundation_radfm.py's module docstring. OmiCLIP's import always fails
+# (OMICLIP_AVAILABLE is hardcoded False) since its loading API couldn't be
+# verified against the real Loki repo — see foundation_omiclip.py.
+try:
+    from models.foundation_radfm import RadFMModel
+    RADFM_IMPORT_OK = True
+except (ImportError, OSError):
+    RADFM_IMPORT_OK = False
+
+try:
+    from models.foundation_biomedparse import BiomedParseModel
+    BIOMEDPARSE_IMPORT_OK = True
+except (ImportError, OSError):
+    BIOMEDPARSE_IMPORT_OK = False
+
+try:
+    from models.foundation_segvol import SegVolModel
+    SEGVOL_IMPORT_OK = True
+except (ImportError, OSError):
+    SEGVOL_IMPORT_OK = False
+
+try:
+    from models.foundation_omiclip import OmiCLIPModel
+    OMICLIP_IMPORT_OK = True
+except (ImportError, OSError):
+    OMICLIP_IMPORT_OK = False
+
 
 def build_registry(fitted_vitals_model=None) -> dict[str, list]:
     """
@@ -90,6 +124,37 @@ def build_registry(fitted_vitals_model=None) -> dict[str, list]:
             "skin", "skin", "classification", SKIN_CLASSES, "EfficientNetSkinLesionModel")]
         registry["ct_scan"] = [StubSpecialistModel(
             "ct-scan", "ct_scan", "segmentation", ["region_flagged", "no_region_flagged"], "UNetSegmentationModel")]
+
+    # --- SOTA foundation-model specialists — new modalities, additive to the
+    # ones above (not replacements: chest_xray/retina/skin/ct_scan keep
+    # working exactly as before). See docs/foundation-models-status.md for
+    # what's real vs. blocked vs. unresolved among these six.
+    try:
+        registry["radiology_vqa"] = [RadFMModel()]
+    except (ImportError, OSError, NotImplementedError):
+        registry["radiology_vqa"] = [StubSpecialistModel(
+            "radfm", "radiology_vqa", "generative_vqa", ["finding_present", "no_finding"], "RadFMModel")]
+
+    try:
+        registry["prompted_segmentation"] = [BiomedParseModel()]
+    except (ImportError, OSError):
+        registry["prompted_segmentation"] = [StubSpecialistModel(
+            "biomedparse", "prompted_segmentation", "segmentation",
+            ["regions_flagged", "no_regions_flagged"], "BiomedParseModel")]
+
+    try:
+        registry["ct_volumetric"] = [SegVolModel()]
+    except (ImportError, OSError):
+        registry["ct_volumetric"] = [StubSpecialistModel(
+            "segvol", "ct_volumetric", "segmentation",
+            ["regions_flagged", "no_regions_flagged"], "SegVolModel")]
+
+    try:
+        registry["pathology_omics"] = [OmiCLIPModel()]
+    except (ImportError, OSError, NotImplementedError):
+        registry["pathology_omics"] = [StubSpecialistModel(
+            "omiclip", "pathology_omics", "classification",
+            ["concordant", "discordant"], "OmiCLIPModel")]
 
     return registry
 
