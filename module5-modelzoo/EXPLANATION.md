@@ -20,19 +20,29 @@ specialist built for it.
   Because every specialist implements the same interface, the router never
   needs to know or care which underlying architecture it's actually
   calling.
-- **`models/`** holds five specialists: XGBoost for structured vitals
-  (fully real, no heavy dependencies), and DenseNet201 (chest X-ray),
-  ResNet50 (retinal disease grading), EfficientNet-B0 (skin lesion
-  classification), and a custom U-Net (pixel-level segmentation) for
-  imaging. The imaging models are real, correct torchvision
-  transfer-learning code — but in the sandbox this was built in, `torch`
-  wasn't installed (it's a multi-gigabyte dependency), so `registry.py`
-  automatically detects that and substitutes a clearly labeled stub for
-  each imaging specialist instead of skipping them. Every stub result is
-  tagged `is_stub=True` so nothing pretends to be a real prediction that
-  isn't. Installing `torch`/`torchvision` on a real machine switches all
-  four back to their real implementations with zero code changes anywhere
-  else.
+- **`models/`** holds nine specialists: XGBoost and TabPFN v2 for
+  structured vitals (both fully real, no heavy dependencies), DenseNet201
+  (chest X-ray), ResNet50 (retinal disease grading), EfficientNet-B0
+  (skin lesion classification), and a custom U-Net (pixel-level
+  segmentation) for imaging, plus four SOTA foundation-model additions —
+  RadFM (radiology VQA), BiomedParse (text-prompted segmentation), SegVol
+  (volumetric CT segmentation), and OmiCLIP (histopathology/omics
+  alignment). The four original imaging models are real, correct
+  torchvision transfer-learning code — but in the sandbox this was built
+  in, `torch` wasn't installed (it's a multi-gigabyte dependency), so
+  `registry.py` automatically detects that and substitutes a clearly
+  labeled stub for each imaging specialist instead of skipping them. The
+  four foundation-model additions need more than torch (cloned upstream
+  repos, `huggingface.co`-hosted weights, or a GPU — see
+  `docs/foundation-models-status.md`) and stub out the same way. Every
+  stub result is tagged `is_stub=True` so nothing pretends to be a real
+  prediction that isn't. Installing the real dependencies on a real
+  machine switches each one back to its real implementation with zero
+  code changes anywhere else — except RadFM, whose `predict()` is
+  intentionally left unimplemented even when its repo is importable,
+  since it's a generative model and writing its output logic without a
+  real checkpoint to validate against would mean guessing at what
+  "confidence" means for a generated sentence.
 - **`router.py`** implements `MetadataRouter` — given a case that declares
   its own modality (e.g., `"modality": "chest_xray"`), it picks the
   specialist built for that modality. Metadata-based routing (not a

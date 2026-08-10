@@ -18,37 +18,54 @@ python demo.py
 |---|---|
 | `base.py` | `SpecialistModel` interface + `PredictionResult` — the contract every specialist implements, so the router never needs to know which architecture it's talking to |
 | `models/tabular_vitals.py` | **XGBoost** — structured vitals (real, fully working, no heavy dependency) |
+| `models/tabular_vitals_tabpfn.py` | **TabPFN v2** — structured vitals, in-context tabular foundation model; current default per `docs/model-algorithm-catalog.md`, XGBoost stays registered alongside it |
 | `models/imaging_chest_xray.py` | **DenseNet201** — chest X-ray findings (pneumonia/TB) |
 | `models/imaging_retina.py` | **ResNet50** — diabetic retinopathy grading |
 | `models/imaging_skin.py` | **EfficientNet-B0** — skin lesion classification |
 | `models/imaging_segmentation.py` | **Custom U-Net** — pixel-level segmentation (tumor/organ boundaries) |
+| `models/foundation_radfm.py` | **RadFM** — radiology vision-language specialist; loading code real, `predict()` intentionally unimplemented (generative model, no checkpoint to validate against here) — see `docs/foundation-models-status.md` |
+| `models/foundation_biomedparse.py` | **BiomedParse** — text-prompted segmentation across 9 imaging modalities; real loading + inference code, untested here (no GPU/HF access) |
+| `models/foundation_segvol.py` | **SegVol** — volumetric CT segmentation via `transformers`; real loading code, untested here |
+| `models/foundation_omiclip.py` | **OmiCLIP** — histopathology/omics alignment; confirmed real upstream, left as an honest stub pending verified loading API — see `docs/foundation-models-status.md` |
 | `models/stub.py` | Placeholder used only when a real specialist's dependencies aren't installed |
 | `registry.py` | Builds `{modality: [SpecialistModel, ...]}` — the model zoo itself |
 | `router.py` | `MetadataRouter` — picks the right specialist(s) for a case |
-| `fusion.py` | Combines multiple specialists' outputs into one overall risk assessment |
-| `demo.py` | **Run this.** Proves all five specialists coexist and are correctly routed |
+| `fusion.py` | Combines multiple specialists' outputs into one overall risk assessment — see `docs/module8-code-review-notes.md` for a severity-table gap found and fixed here |
+| `demo.py` | **Run this.** Proves all specialists coexist and are correctly routed |
+
+Nine specialists total now (vitals ×2, four original imaging, four foundation-model additions) — up from the original five. See `docs/foundation-models-status.md` for exactly which of the foundation-model additions are real-but-unavailable-here vs. genuinely blocked upstream (MeDiM) vs. unresolved (Mamba-Health/MICViT, requested but not yet matched to a real published model).
 
 ## Why the imaging specialists are stubs when you run this
 
-This model zoo uses five different architectures. Only one — XGBoost for
-vitals — is lightweight enough to actually install and run in every
-environment. DenseNet201, ResNet50, EfficientNet, and U-Net need
+This model zoo now spans nine specialist entries. Only two — XGBoost and
+TabPFN for vitals — are lightweight enough to actually install and run in
+every environment. DenseNet201, ResNet50, EfficientNet, and U-Net need
 `torch` + `torchvision`, which are large (multi-GB with CUDA
 dependencies) and weren't installed when this was built (disk-constrained
-sandbox). Rather than skip those four specialists, `registry.py` detects
-whether `torch` imports cleanly and **automatically substitutes a clearly
-labeled stub** (`is_stub=True` on every result) if it doesn't — so the
-router/fusion logic is fully exercised end-to-end regardless.
+sandbox). The four foundation-model additions (RadFM, BiomedParse, SegVol,
+OmiCLIP) go further still — beyond torch, they need either a cloned
+upstream repo, `huggingface.co` network access for weights, or a GPU, none
+of which this sandbox has. Rather than skip any of them, `registry.py`
+detects each one's real dependency and **automatically substitutes a
+clearly labeled stub** (`is_stub=True` on every result) when it's missing
+— so the router/fusion logic is fully exercised end-to-end regardless.
 
 **On your own machine**, install torch + torchvision:
 ```bash
 pip install torch torchvision
 ```
-Re-run `python demo.py` — the four imaging specialists switch from stubs
-to their real architectures automatically, with zero code changes needed
-in `router.py`, `fusion.py`, or `demo.py`. The model code itself
-(`models/imaging_*.py`) is real, correct torchvision transfer-learning
-setup — it just hasn't been execution-tested in this sandbox.
+Re-run `python demo.py` — the four original imaging specialists switch
+from stubs to their real architectures automatically, with zero code
+changes needed in `router.py`, `fusion.py`, or `demo.py`. The model code
+itself (`models/imaging_*.py`) is real, correct torchvision
+transfer-learning setup — it just hasn't been execution-tested in this
+sandbox.
+
+The four foundation-model additions need more than torch — see each
+`models/foundation_*.py` file's module docstring and
+`docs/foundation-models-status.md` for exact requirements per model
+(cloned repos, `huggingface.co` weights, GPU). They won't switch on just
+from installing torch/torchvision.
 
 ## Why routing is metadata-based, not a learned classifier
 

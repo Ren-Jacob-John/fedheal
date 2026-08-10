@@ -8,6 +8,46 @@ following the build order from the project proposal:
 3. Local training (XGBoost/logistic regression) + Flower federated loop across simulated hospitals
 4. Dashboard wired to show login + training/round status
 
+## Abstract
+
+Modern clinical AI faces a structural tension: models generalize best when
+trained on large, diverse patient populations, but privacy regulation
+(HIPAA, GDPR) and institutional data-governance policies prevent hospitals
+from pooling raw patient records on a central server. FedHeal addresses
+this by combining **federated learning** with a **modular, multi-specialist
+diagnostic architecture**, allowing multiple hospitals to collaboratively
+train a shared model without any patient-level data ever leaving its
+institution of origin.
+
+The system is organized as eight cooperating modules. A multi-tenant
+authentication layer issues hospital-scoped tokens that every downstream
+service trusts exclusively. A five-stage validation gate
+(de-identification screening, schema checks, plausibility ranges,
+cross-field consistency, and batch-level outlier detection) filters
+uploaded data before it can influence the shared model. Local training
+happens independently at each hospital; only learned model weights,
+aggregated centrally via Federated Averaging (FedAvg), are ever exchanged.
+Rather than a single model attempting every diagnostic task, a **model
+zoo** of specialist architectures — spanning tabular (XGBoost, TabPFN),
+imaging (CNN-based classifiers, segmentation networks, and integration
+groundwork for foundation models including RadFM, BiomedParse, and
+SegVol), and genomic/histopathology data — sits behind a metadata-driven
+router that dispatches each case only to the specialist built for it,
+explicitly avoiding the failure mode of a confident answer from a
+mismatched model. A condition router expands a named disease into its
+full set of required specialists and explanation methods (SHAP, Grad-CAM,
+knowledge-graph reasoning), and a synthesis layer aggregates these
+outputs into a structured review packet for clinician oversight —
+deliberately stopping short of automated diagnosis or treatment
+recommendation, and requiring human sign-off by design.
+
+FedHeal demonstrates that privacy-preserving collaboration, data-quality
+enforcement, and explainable, human-supervised multi-modal diagnosis can
+coexist within one coherent, incrementally extensible architecture — a
+template applicable beyond healthcare to any multi-party setting where
+data cannot be centralized but collaborative intelligence is still
+valuable.
+
 ## Problem Statement
 
 Modern healthcare AI needs large, diverse patient datasets to build models
@@ -38,7 +78,7 @@ ever leaving its own servers?**
 ## Solution
 
 FedHeal is a **federated learning platform for healthcare**, built as
-seven cooperating modules that together implement the full pipeline from
+eight cooperating modules that together implement the full pipeline from
 hospital login to a continuously improving shared model:
 
 1. **Authentication & multi-tenancy** (`module1-auth/`) — every hospital
@@ -65,8 +105,11 @@ hospital login to a continuously improving shared model:
    seven modules — see its own README for the design rationale.
 5. **Model zoo & task router** (`module5-modelzoo/`) — a library of
    specialist models (one per data modality: vitals, chest X-ray, retina,
-   skin, segmentation) behind one common interface, with a router that
-   sends each case to the specialist actually built for it.
+   skin, segmentation, plus four SOTA foundation-model additions — RadFM,
+   BiomedParse, SegVol, OmiCLIP — see `docs/foundation-models-status.md`
+   for what's real vs. blocked among those) behind one common interface,
+   with a router that sends each case to the specialist actually built
+   for it.
 6. **Condition router** (`module6-condition-router/`) — given a disease
    name (e.g. "breast cancer", "leukemia"), automatically pulls in every
    specialist model and every explanation method (SHAP, Grad-CAM,
@@ -76,6 +119,13 @@ hospital login to a continuously improving shared model:
    single view across the whole platform: which hospitals are active, is
    the shared model actually improving round over round, and how much
    data is being flagged for quality issues.
+8. **Synthesis / review-packet layer** (`module8-synthesis/`) — aggregates
+   Module 5/6's raw specialist findings into one structured report for a
+   clinician to review. Deliberately does not emit a diagnosis, treatment
+   plan, or cross-modality confidence score it can't justify — every
+   report is hardcoded `requires_clinician_review = True` and every
+   number in it traces back to a real specialist's confidence. See its
+   README for the full rationale.
 
 ## Importance to Society
 
@@ -200,6 +250,13 @@ fusion, and additional explainability/reasoning methods).
 - **`docs/16-week-development-plan.md`** — the full 16-week schedule this
   project follows, from initial proposal through final demo. Weeks 1–9
   cover the modules already in this repo; weeks 10–16 are the forward plan.
+- **`docs/foundation-models-status.md`** — status of the SOTA
+  foundation-model specialists added to Module 5 (RadFM, BiomedParse,
+  SegVol, OmiCLIP, MeDiM, plus two unresolved names) — what's real code
+  vs. blocked upstream vs. unverified.
+- **`docs/module8-code-review-notes.md`** — code review findings from
+  building Module 8, including a fusion-severity-table bug found and
+  fixed in `module5-modelzoo/fusion.py`.
 - **Every `moduleN-*/EXPLANATION.md`** — a full, presentation-ready
   explanation of what that module does, how it works, and how it connects
   to the rest of the system. (`moduleN-*/README.md` stays the terse,
@@ -227,9 +284,10 @@ named. Every future stage should pick its model(s) from this document.
 | **P2 — Data Engineer** | Data Ingestion & Validation | `module2-validation/` | ✅ Done & tested. Schema, range, consistency, and outlier checks. |
 | **P3 — ML Engineer** | Local Training + Federated Aggregation | `module3-fedlearning/` | ✅ Done & tested. Working FedAvg simulation, 3 hospitals, non-IID data. |
 | **P4 — Frontend** | Hospital Dashboard | `module4-dashboard/` | ✅ Done & tested. Plain HTML/JS wired to Module 1's real API. |
-| **P3 (cont.) — ML Engineer** | Model Zoo & Task Router | `module5-modelzoo/` | ✅ Done & tested. XGBoost (real) + DenseNet201/ResNet50/EfficientNet/U-Net (real code, stubbed in this sandbox — see its README) coexisting via a router + fusion layer. |
+| **P3 (cont.) — ML Engineer** | Model Zoo & Task Router | `module5-modelzoo/` | ✅ Done & tested. XGBoost + TabPFN v2 (both real) + DenseNet201/ResNet50/EfficientNet/U-Net (real code, stubbed in this sandbox) + RadFM/BiomedParse/SegVol/OmiCLIP (real loading code added, stubbed here — see `docs/foundation-models-status.md`) coexisting via a router + fusion layer. |
 | **P3 (cont.) — ML Engineer** | Condition Router (auto-switch by disease) | `module6-condition-router/` | ✅ Done & tested. Mention a disease (breast cancer, leukemia, diabetic retinopathy, etc.) and it auto-routes to the right specialist(s) + reasoning method(s) — see its README for the 5 verified condition pathways. |
 | **P1 (cont.) — Backend/Auth** | Admin / Platform Module (the operator's view) | `module7-admin/` | ✅ Done & tested. Hospital oversight (proxies Module 1), training-round history, validation-flag summaries, and a working "trigger a round" endpoint. First real cross-module wiring — see its README for exactly what's real. |
+| — | Synthesis / Review-Packet Layer | `module8-synthesis/` | ✅ Done & tested. Aggregates Module 5/6 findings into a clinician review packet — no diagnosis, no treatment plan, `requires_clinician_review` hardcoded true. See its README. |
 
 > Week mapping for this build: Week 1 = Modules 1–4, Week 2 = Module 5,
 > Week 3 = Module 6, Week 4 = Module 7. This is the 8-module breakdown
@@ -298,3 +356,48 @@ export FEDMED_JWT_SECRET=dev-only-change-me   # MUST match Module 1's
 export FEDMED_SERVICE_KEY=dev-only-internal-service-key
 uvicorn main:app --reload --port 8005
 ```
+
+## Creating a hospital login
+
+Every user in FedHeal belongs to a hospital (tenant) — there's no
+standalone "sign up" separate from that. With Module 1 running
+(`localhost:8001`), the full flow from zero to a logged-in session:
+
+```bash
+# 1. Create the hospital (tenant) itself
+curl -X POST localhost:8001/hospitals -H "Content-Type: application/json" \
+  -d '{"name": "General Hospital"}'
+# -> {"id": "<hospital_id>", "name": "General Hospital", "is_active": true}
+# copy <hospital_id> from the response for the next step
+
+# 2. Register a user under that hospital
+curl -X POST localhost:8001/register -H "Content-Type: application/json" \
+  -d '{"email": "doc@general.com", "password": "hunter2", "hospital_id": "<hospital_id>"}'
+# role defaults to "clinician" if not specified — see roles below
+
+# 3. Log in — /token takes an OAuth2 form body, not JSON
+curl -X POST localhost:8001/token -d "username=doc@general.com&password=hunter2"
+# -> {"access_token": "<jwt>", "token_type": "bearer"}
+
+# 4. Use the token on any protected endpoint
+curl localhost:8001/me -H "Authorization: Bearer <jwt>"
+```
+
+You can also do all four steps interactively at
+http://localhost:8001/docs once Module 1 is running.
+
+**Roles** (set at registration via `"role"` in step 2, defaults to
+`clinician` if omitted):
+- `clinician` — views predictions, uploads vitals for their own hospital
+- `hospital_admin` — manages that hospital's users/data
+- `super_admin` — platform operator; the only role that can deactivate a
+  hospital (`PATCH /hospitals/{id}`)
+
+The JWT from step 3 carries the user's hospital ID and role — every other
+endpoint trusts *only* what's inside that signed token, never a
+client-supplied hospital ID, so a logged-in user can't act on another
+hospital's data by changing a request parameter.
+
+For the full endpoint reference (what's auth-gated, request/response
+shapes, the vitals-upload and export flows) see
+`module1-auth/README.md`.

@@ -9,9 +9,13 @@ training a CNN/tree from scratch per hospital.
 
 **Purpose of this document:** every future stage/week of development pulls
 its model choices from (or explicitly extends) this list. It's not limited
-to what's already implemented in `module5-modelzoo` — that module currently
-uses 5 entries that are now dated (XGBoost, DenseNet201, ResNet50,
-EfficientNet, U-Net). This document is the full menu, current generation.
+to what's already implemented in `module5-modelzoo` — that module now has
+9 specialist entries spanning several generations (XGBoost, TabPFN v2,
+DenseNet201, ResNet50, EfficientNet, U-Net, plus RadFM/BiomedParse/
+SegVol/OmiCLIP added most recently — see
+`docs/foundation-models-status.md` for which of those actually run vs.
+are real-but-unavailable-here vs. blocked upstream). This document is the
+full menu, current generation.
 
 Two things every disease-specific pipeline needs, per the project's own
 framing ("a prediction a doctor can check, not a black box"):
@@ -36,6 +40,7 @@ the pattern, it's called out explicitly.
 | Model family | Status | Notes | Good fit for |
 |---|---|---|---|
 | **BiomedCLIP** | **Current** | Vision-language foundation model, contrastive-pretrained on ~15M biomedical image-text pairs from PubMed Central; produces embeddings usable zero-shot or with a lightweight fine-tuned head | General biomedical image classification across modalities, good default starting point |
+| **RadFM** | **Current, but generative not classification** | Radiology-specific vision-language model (Wu et al., MedMD dataset) — answers free-text clinical questions about a scan rather than outputting a fixed-class label; see `module5-modelzoo/models/foundation_radfm.py` for the interface-mismatch this creates against this zoo's label+confidence contract | When free-text radiologic Q&A/reasoning is the actual need, not a classification score |
 | **CheXzero** | **Current** | Contrastive pretraining directly on MIMIC-CXR image-report pairs; demonstrated radiologist-level zero-shot multi-label chest pathology classification without explicit annotations | Chest X-ray, when labeled data per hospital is scarce |
 | **CXRBase** | **Current** | Masked-autoencoder self-supervised foundation model trained on 1M+ unlabeled CXR images, then fine-tuned for disease classification/localization | Chest X-ray, when you have volume of *unlabeled* local images plus a smaller labeled set |
 | **MedGemma** | **Current** | Google's open-weight multimodal medical foundation model (image + text); can be self-hosted, which matters for a hospital-local deployment | General-purpose medical image reasoning + generating the "why" narrative in one model |
@@ -49,6 +54,8 @@ the pattern, it's called out explicitly.
 | Model family | Status | Notes | Good fit for |
 |---|---|---|---|
 | **SAM2 / MedSAM2** | **Current** | Meta's Segment Anything Model 2, fine-tuned for medical volumes; treats a 3D scan as a "video" and propagates a single prompt through the volume — dramatically fewer labels needed than U-Net-family training | Volumetric CT/MRI segmentation with limited per-hospital labeled masks; interactive clinician-in-the-loop correction |
+| **BiomedParse** | **Current** | Joint segmentation/detection/recognition across 9 imaging modalities via text prompts (Microsoft) — one model instead of one-per-modality; see `module5-modelzoo/models/foundation_biomedparse.py` for real (untested-here) integration code | Text-prompted segmentation across modalities without training a separate model per one |
+| **SegVol** | **Current** | Volumetric CT segmentation via point/box/text prompts, 200+ anatomical categories (BAAI); ships as a standard `transformers` `trust_remote_code` model — see `module5-modelzoo/models/foundation_segvol.py` | CT-specific volumetric segmentation, broader anatomical category coverage than a custom-trained U-Net |
 | **nnU-Net** | **Current — still the gold-standard baseline** | Not obsolete: 2026 papers keep finding it competitive with or beating out-of-the-box SAM2 on task-specific, well-labeled datasets. Self-configuring — picks its own architecture/preprocessing per dataset | Default when a hospital has a reasonably sized labeled segmentation dataset for one specific task |
 | Attention U-Net, V-Net, U-Net++ | **Legacy — nnU-Net supersedes these as a default choice** | Individually still published/used, but nnU-Net's auto-configuration generally reaches the same or better results with less manual tuning | Keep only for specific architectures a paper you're replicating requires |
 | Mask R-CNN, DeepLab v3/v3+ | **Outdated for medical segmentation specifically** | Still fine for general computer vision; medical segmentation work has moved to the nnU-Net/SAM2 axis | — |
@@ -62,6 +69,7 @@ the pattern, it's called out explicitly.
 | **Virchow2** | **Current** | Trained on 3.1M whole-slide images (Memorial Sloan Kettering); one of the largest pathology foundation models published | Same use cases as UNI; strong alternative/ensemble partner |
 | **Prov-GigaPath** | **Current** | Trained on 1.3B patches from 171K+ slides (Providence health system) | Same tier as UNI/Virchow2 |
 | **CONCH** | **Current** | Vision-*language* pathology foundation model (image-caption pairs from PubMed) — lets you query slide regions with text, not just classify | When you want text-grounded reasoning over a slide, not just a label |
+| **OmiCLIP** | **Current, integration unverified** | Visual-omics foundation model bridging histopathology images with spatial transcriptomics (Chen et al., Nat Methods 2025) — ships inside the `Loki` repo rather than as a standalone package; confirmed real but a verified loading/inference API couldn't be confirmed — see `module5-modelzoo/models/foundation_omiclip.py` and `docs/foundation-models-status.md` before building on this one | Correlating histopathology morphology with gene-expression-level findings, once its real API is confirmed |
 | Multiple Instance Learning (MIL/CLAM) on **foundation-model embeddings** | **Current pattern** | This is how you actually use the four models above in a diagnostic pipeline: extract patch embeddings with UNI/Virchow2/Prov-GigaPath, then train a small MIL aggregator (CLAM-style) on top — that MIL head is what federates cheaply | Breast cancer histopathology (BACH, CAMELYON), any whole-slide diagnosis |
 | MIL/CLAM on raw patch-CNN features | **Legacy** | Same architecture, weaker feature extractor underneath; foundation-model embeddings measurably outperform ImageNet-CNN patch features on pathology benchmarks | Fallback only if none of the above foundation models are accessible |
 | HoVer-Net, Cellpose, StarDist | **Still current for their specific niche** | Nucleus/cell segmentation hasn't been fully subsumed by the slide-level foundation models above — those work at the tile/embedding level, not per-cell | Blood smear cell counting/morphology (leukemia), nucleus-level analysis |
@@ -123,6 +131,7 @@ the pattern, it's called out explicitly.
 | Approach | Status | Notes |
 |---|---|---|
 | **Native multimodal foundation models (MedGemma, CONCH)** | **Current** | These fuse modalities *by design* inside one model rather than combining separately-trained specialists after the fact — the current state of the art for multi-modal medical AI |
+| **MeDiM** | **Published, not yet released** | Medical discrete diffusion model unifying image/report generation across modalities without modality-specific components (Mao et al., UCSC-VLAA, ICLR 2026 submission) — real paper, real GitHub repo, but the repo's own status is "code will be available soon." Nothing to integrate against yet; check back before building on this one |
 | Attention-based cross-modal fusion (custom transformer combining separate encoders) | **Current, when you need custom modality combinations** | Still the right DIY approach when no single foundation model covers your exact combination of modalities |
 | Late fusion (your current `fusion.py` approach) | **Legacy pattern — but keep it** | Simplest, most interpretable, and still defensible specifically *because* FedHeal's whole pitch is "a checkable second opinion, not a black box." Don't discard this for the sake of being current — it's a legitimate design choice, not just an outdated one |
 | Early fusion (raw feature concatenation) | **Outdated** | Generally underperforms both late fusion and embedding-level fusion; rarely used anymore | — |
@@ -199,15 +208,16 @@ that runs.
 Everything above is the reference menu. This is the direct answer to
 "remove outdated models" for what's actually implemented today:
 
-| Currently in `module5-modelzoo` | Verdict | Swap to | Effort |
+| Currently in `module5-modelzoo` / `module6-condition-router` | Verdict | Swap to | Effort |
 |---|---|---|---|
-| `XGBoostVitalsModel` (tabular) | Not wrong, but no longer the strongest option | Add `TabPFN v2` as an alternative/default | **Low** — pip-installable, no GPU needed, drop-in on the same `SpecialistModel` interface |
+| `XGBoostVitalsModel` (tabular) | ✅ Addressed | `TabPFNVitalsModel` added alongside it as the current default (see `models/tabular_vitals_tabpfn.py`) | Done |
 | `DenseNet201ChestXrayModel` | Legacy | `BiomedCLIP` or `CXRBase` embedding + head | **Medium** — needs HF `transformers`, a fine-tuning pass, no gated-weight approval needed |
 | `ResNet50RetinaModel` | Legacy | `BiomedCLIP` embedding + head | **Medium** — same pattern as above |
-| `EfficientNetSkinLesionModel` | Legacy | `BiomedCLIP` embedding + head | **Medium** — same pattern |
-| `UNetSegmentationModel` | Legacy but reasonable fallback | `nnU-Net` (if labeled data is decent) or `MedSAM2` (if labels are scarce) | **Medium-High** — nnU-Net is a bigger framework swap; MedSAM2 needs Meta's SAM2 checkpoint |
-| *(missing entirely)* | Gap, not outdated | Histopathology track (UNI/Virchow2/CONCH + MIL) | **New build** — you have no whole-slide specialist at all yet, and it's the single biggest upgrade for the breast-cancer track specifically |
-| *(missing entirely)* | Gap, not outdated | Genomic variant track (Evo 2 / AlphaMissense / AlphaGenome) | **New build** — directly relevant to your named BRCA1/2 and leukemia-cytogenetics use cases |
+| `EfficientNetSkinLesionModel` | Legacy but reasonable fallback | `BiomedCLIP` embedding + head | **Medium** — same pattern |
+| `UNetSegmentationModel` | Legacy but reasonable fallback; `BiomedParse`/`SegVol` now added alongside it as current-tier options | `nnU-Net` (if labeled data is decent) or the newly-added `BiomedParse`/`SegVol` (prompted segmentation, no per-task training) | **Medium** for `BiomedParse`/`SegVol` — real loading code already exists (`models/foundation_biomedparse.py`, `models/foundation_segvol.py`), blocked only on GPU + `huggingface.co` access, not on writing more code |
+| `RadFMModel`, `OmiCLIPModel` (newly added) | Real loading code, not runnable in this sandbox | N/A — blocked on infrastructure (GPU, HF network access), and RadFM's `predict()` on a real interface decision (generative, not classification) | See `docs/foundation-models-status.md` |
+| Histopathology track (`module6-condition-router`'s `HistopathologyMILModel`) | ✅ Exists, but sklearn-family, not foundation-model-backed | `UNI`/`Virchow2`/`Prov-GigaPath` embeddings + MIL head (or `OmiCLIP` once its API is confirmed) | **Medium-High** — real upgrade path, not a from-scratch build anymore |
+| *(still missing entirely)* | Gap, not outdated | Genomic variant track (Evo 2 / AlphaMissense / AlphaGenome) beyond the current sklearn-family `GenomicExpressionModel` | **New build** — directly relevant to your named BRCA1/2 and leukemia-cytogenetics use cases |
 
 ## How this gets used going forward
 
