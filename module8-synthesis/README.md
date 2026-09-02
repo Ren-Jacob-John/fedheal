@@ -56,10 +56,9 @@ decision, not an oversight:
 
 ## Next sprint
 
-- Wire this into Module 4's dashboard as the actual rendered view
-  (currently the dashboard is plain HTML/JS per week 5's "no framework
-  yet" note in the 16-week plan — Module 8's `to_markdown()` output is a
-  reasonable stand-in until week 14's React rebuild).
+- Wire this into Module 4's dashboard (`module4-dashboard/`, React +
+  Vite) as the actual rendered view — Module 8's `to_markdown()` output
+  is a reasonable stand-in until that's built.
 - Add a persistence layer (Module 7 admin already has a DB) so a
   `SynthesisReport` can be stored with a clinician's eventual
   sign-off/override, closing the loop this module deliberately leaves

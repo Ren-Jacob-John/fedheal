@@ -96,17 +96,13 @@ hospital login to a continuously improving shared model:
    central process that averages them (**Federated Averaging / FedAvg**)
    into one improved global model, which is then sent back out for
    another round.
-4. **Hospital dashboard** (`module4-dashboard-react/`) — the interface a
+4. **Hospital dashboard** (`module4-dashboard/`) — the interface a
    clinician or hospital admin uses to log in, upload vitals, and see
    their hospital's status and validated-record count, plus a spatial
    "federation map" — every hospital as a node in orbit around the shared
    model, live status, and an architecture view of all seven modules — see
-   its own README for the design rationale. The original plain-HTML
-   `module4-dashboard/` has been removed: it was confirmed fully
-   superseded (same job, same API contracts against Module 1 and Module 7
-   — see `module4-dashboard-react/README.md`'s "What's role-gated, and
-   why" table), and the project consolidates on one dashboard going
-   forward rather than maintaining both long-term.
+   its own README for the design rationale, including the "What's
+   role-gated, and why" table.
 5. **Model zoo & task router** (`module5-modelzoo/`) — a library of
    specialist models (one per data modality: vitals, chest X-ray, retina,
    skin, segmentation, genomic variants, plus four SOTA foundation-model
@@ -299,7 +295,7 @@ named. Every future stage should pick its model(s) from this document.
 | **P1 — Backend/Auth** | Authentication & Multi-Tenancy | `module1-auth/` | ✅ Done & tested. Hospital register/login/JWT, hospital-scoped endpoints. |
 | **P2 — Data Engineer** | Data Ingestion & Validation | `module2-validation/` | ✅ Done & tested. Schema, range, consistency, and outlier checks. |
 | **P3 — ML Engineer** | Local Training + Federated Aggregation | `module3-fedlearning/` | ✅ Done & tested. Working FedAvg simulation, 3 hospitals, non-IID data. |
-| **P4 — Frontend** | Hospital Dashboard | `module4-dashboard-react/` | ✅ Done & tested. React "federation map," wired to Module 1 + Module 7's real APIs. The original plain-HTML dashboard was removed once this was confirmed fully wired — see the module's README. |
+| **P4 — Frontend** | Hospital Dashboard | `module4-dashboard/` | ✅ Done & tested. React "federation map," wired to Module 1 + Module 7's real APIs — see the module's README. |
 | **P3 (cont.) — ML Engineer** | Model Zoo & Task Router | `module5-modelzoo/` | ✅ Done & tested. XGBoost + TabPFN v2 (both real) + legacy DenseNet201/ResNet50/EfficientNet/U-Net + current-tier BiomedCLIP (CNN+ViT-hybrid head)/nnU-Net upgrades (real code, both tiers stubbed in this sandbox, current-tier preferred automatically when available) + Evo 2 genomic-variant specialist (new) + RadFM/BiomedParse/SegVol/OmiCLIP (real loading code added, stubbed here — see `docs/foundation-models-status.md`) coexisting via one unchanged router + fusion layer. |
 | **P3 (cont.) — ML Engineer** | Condition Router (auto-switch by disease) | `module6-condition-router/` | ✅ Done & tested. Mention a disease (breast cancer, leukemia, diabetic retinopathy, etc.) and it auto-routes to the right specialist(s) + reasoning method(s) — see its README for the verified condition pathways. Histopathology now defaults to a UNI2-h + CLAM-style MIL specialist (legacy attention-MIL kept as fallback), and breast cancer/leukemia gained an Evo 2 genomic-variant track alongside the existing Random Forest expression-panel model. |
 | **P1 (cont.) — Backend/Auth** | Admin / Platform Module (the operator's view) | `module7-admin/` | ✅ Done & tested. Hospital oversight (proxies Module 1), training-round history, validation-flag summaries, and a working "trigger a round" endpoint. First real cross-module wiring — see its README for exactly what's real. |
@@ -358,8 +354,8 @@ cd module3-fedlearning && pip install -r requirements.txt --break-system-package
 python simulate.py          # synthetic data, no dependencies on other modules
 python simulate_real.py     # real hospital data — needs Module 1 + Module 2 running first
 
-# Module 4 — Dashboard, React "Federation Map" (see module4-dashboard-react/README.md)
-cd module4-dashboard-react && npm install
+# Module 4 — Dashboard, React "Federation Map" (see module4-dashboard/README.md)
+cd module4-dashboard && npm install
 npm run dev          # http://localhost:5173
 
 # Module 7 — Admin/Platform service (start Module 1 first — it proxies to it)

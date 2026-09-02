@@ -2,10 +2,8 @@
 
 The project's one hospital dashboard, built in React + Vite. Log in,
 upload vitals, see your hospital's status — plus a live view of the whole
-federation for the platform operator. (This started as a spatial
-replacement for an earlier plain-HTML dashboard; that version has since
-been removed now that this one is confirmed fully wired to Module 1 and
-Module 7's real APIs — see the root README's module list.)
+federation for the platform operator, fully wired to Module 1 and
+Module 7's real APIs.
 
 ## Why spatial
 
@@ -43,15 +41,14 @@ Needs Module 1 (`:8001`) and, for the super-admin view, Module 7
 (`:8005`) already running — see the repo root README.
 
 ```bash
-cd module4-dashboard-react
+cd module4-dashboard
 npm install
 cp .env.example .env.local   # only needed if you changed the default ports
 npm run dev                  # http://localhost:5173
 ```
 
 `npm run build` produces a static `dist/` you can serve however you like
-(it's a client-only SPA — same deployment model as the old
-`module4-dashboard`, just with a build step now).
+— it's a client-only SPA.
 
 ## What's role-gated, and why
 
