@@ -31,9 +31,18 @@ def main():
     router = ConditionRouter()
 
     # --- Breast cancer: auto-switches to histopathology (MIL) + genomic specialists ---
+    # Now three specialist_ids: histopathology (UNI2-h/CLAM-current-tier, stub
+    # here), genomic_variant (Evo 2, new — stub here, no GPU/HF access in this
+    # sandbox) supplied with placeholder variant-window data, and the
+    # existing Random Forest expression-panel model (real).
     rng = np.random.default_rng(7)
     report = router.route("breast cancer", {
         "genomic_breast_cancer": {"expression": rng.normal(size=20).tolist()},
+        "genomic_variant_breast_cancer": {
+            "reference_sequence": "ACGT" * 10,
+            "alt_sequence": "ACGT" * 9 + "ACGA",
+            "variant": {"chrom": "17", "pos": 43094692, "ref": "T", "alt": "A"},  # illustrative BRCA1-locus-shaped example, not a real call
+        },
         "histopathology_breast_cancer": {"patch_features": None},  # stub ignores it in this sandbox
     })
     print_report(report)

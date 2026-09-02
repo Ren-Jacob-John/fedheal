@@ -1,15 +1,26 @@
 """
 The model zoo itself: every specialist the system knows about, keyed by
-modality. This is what lets DenseNet201, ResNet50, U-Net, EfficientNet, and
-XGBoost all "coexist" — they're just entries in this dict, each wrapped in
-the same SpecialistModel interface (base.py), never combined into one
-network.
+modality. This is what lets DenseNet201, ResNet50, U-Net, EfficientNet,
+XGBoost, BiomedCLIP, nnU-Net, and Evo 2 all "coexist" — they're just
+entries in this dict, each wrapped in the same SpecialistModel interface
+(base.py), never combined into one network. This is item 1 of the
+project's own modernization instructions, kept deliberately intact: new
+architectures (including a CNN+ViT hybrid — see foundation_biomedclip.py)
+plug in as ONE additional specialist behind this registry + router.py's
+MetadataRouter, never as a replacement for the router/fusion pattern
+itself.
 
-Real imaging specialists need torch/torchvision. When those aren't
-installed (as in this sandbox), build_registry() automatically substitutes
-a clearly-labeled StubSpecialistModel so the router/fusion code is still
-fully exercised — swap `pip install torch torchvision` in and every stub
-is replaced by the real architecture with zero changes to router.py,
+Per-modality candidate lists are ordered current-tier-first: index 0 is
+what `MetadataRouter.route()` actually calls (see router.py), so a
+current-generation foundation model (BiomedCLIP/nnU-Net/Evo 2 — added per
+docs/model-algorithm-catalog.md) is preferred automatically when its real
+dependencies are available, falling back to the legacy architecture, and
+only falling back further to StubSpecialistModel when neither real
+dependency chain is available. When torch/torchvision/open_clip/etc.
+aren't installed (as in this sandbox), build_registry() automatically
+substitutes a clearly-labeled StubSpecialistModel so the router/fusion
+code is still fully exercised — install the real dependencies and every
+stub is replaced by the real architecture with zero changes to router.py,
 fusion.py, or demo.py.
 """
 from models.stub import StubSpecialistModel
@@ -32,6 +43,34 @@ except (ImportError, OSError):
     CXR_CLASSES = ["normal", "pneumonia", "tuberculosis"]
     RETINA_CLASSES = ["no_dr", "mild", "moderate", "severe", "proliferative_dr"]
     SKIN_CLASSES = ["benign_nevus", "melanoma", "basal_cell_carcinoma", "other"]
+
+# --- Current-tier upgrades for the four legacy imaging specialists above ---
+# (see docs/model-algorithm-catalog.md's "What's actually outdated" table).
+# Each degrades independently of its legacy counterpart — BiomedCLIP/nnU-Net
+# missing doesn't affect DenseNet201/ResNet50/EfficientNet/U-Net still being
+# registered as the fallback tier, and vice versa.
+try:
+    from models.foundation_biomedclip import (
+        BiomedCLIPChestXrayModel, BiomedCLIPRetinaModel, BiomedCLIPSkinModel,
+    )
+    BIOMEDCLIP_IMPORT_OK = True
+except (ImportError, OSError):
+    BIOMEDCLIP_IMPORT_OK = False
+
+try:
+    from models.foundation_nnunet import NNUNetSegmentationModel
+    NNUNET_IMPORT_OK = True
+except (ImportError, OSError):
+    NNUNET_IMPORT_OK = False
+
+# --- New genomic variant track (fills the gap noted in the catalog — see
+# foundation_evo2.py's module docstring for how this differs from and
+# complements module6's Random Forest GenomicExpressionModel). ---
+try:
+    from models.foundation_evo2 import Evo2VariantModel
+    EVO2_IMPORT_OK = True
+except (ImportError, OSError):
+    EVO2_IMPORT_OK = False
 
 # --- SOTA foundation-model specialists (see docs/foundation-models-status.md) ---
 # None of these have their real dependencies/weights available in this
@@ -93,37 +132,68 @@ def build_registry(fitted_vitals_model=None) -> dict[str, list]:
     else:
         registry["vitals"] = [XGBoostVitalsModel()]
 
-    # --- Imaging specialists: real if torch/torchvision installed, else stub ---
+    # --- Imaging specialists: current-tier foundation model first (index 0 —
+    # what MetadataRouter.route() actually picks, per router.py's own comment
+    # that candidates[0] is "the simplest case: one specialist per modality"),
+    # legacy ImageNet-pretrained architecture as the registered fallback for
+    # low-resource/no-GPU/no-HF-access hospital deployments (per the catalog's
+    # own guidance: "Keep as the ... fallback tier, not the primary path"),
+    # StubSpecialistModel only if NEITHER real dependency chain is available.
+    def _build_imaging_candidates(biomedclip_ctor, legacy_ctor, stub_id, stub_modality,
+                                   stub_task, stub_classes, legacy_model_name):
+        candidates = []
+        if BIOMEDCLIP_IMPORT_OK:
+            try:
+                candidates.append(biomedclip_ctor())
+            except (ImportError, OSError):
+                pass  # BiomedCLIP's own deps/network access missing — fall through to legacy
+        if IMAGING_IMPORTS_OK:
+            try:
+                candidates.append(legacy_ctor())
+            except (ImportError, OSError):
+                pass
+        if not candidates:
+            candidates.append(StubSpecialistModel(stub_id, stub_modality, stub_task, stub_classes, legacy_model_name))
+        return candidates
+
+    registry["chest_xray"] = _build_imaging_candidates(
+        BiomedCLIPChestXrayModel if BIOMEDCLIP_IMPORT_OK else None,
+        DenseNet201ChestXrayModel if IMAGING_IMPORTS_OK else None,
+        "chest-xray", "chest_xray", "classification", CXR_CLASSES, "DenseNet201ChestXrayModel",
+    )
+    registry["retina"] = _build_imaging_candidates(
+        BiomedCLIPRetinaModel if BIOMEDCLIP_IMPORT_OK else None,
+        ResNet50RetinaModel if IMAGING_IMPORTS_OK else None,
+        "retina", "retina", "classification", RETINA_CLASSES, "ResNet50RetinaModel",
+    )
+    registry["skin"] = _build_imaging_candidates(
+        BiomedCLIPSkinModel if BIOMEDCLIP_IMPORT_OK else None,
+        EfficientNetSkinLesionModel if IMAGING_IMPORTS_OK else None,
+        "skin", "skin", "classification", SKIN_CLASSES, "EfficientNetSkinLesionModel",
+    )
+
+    # --- Segmentation: nnU-Net (current, needs real labeled training data +
+    # a trained model folder — see foundation_nnunet.py) first, custom U-Net
+    # as the no-training-required fallback, stub if neither is available.
+    # For prompted/volumetric segmentation without a per-task labeled
+    # dataset, see the separately-registered `prompted_segmentation` /
+    # `ct_volumetric` modalities below (BiomedParse / SegVol) instead — this
+    # ct_scan slot specifically covers the "we have real labels" branch.
+    ct_scan_candidates = []
+    if NNUNET_IMPORT_OK:
+        try:
+            ct_scan_candidates.append(NNUNetSegmentationModel())
+        except (ImportError, OSError):
+            pass
     if IMAGING_IMPORTS_OK:
         try:
-            registry["chest_xray"] = [DenseNet201ChestXrayModel()]
+            ct_scan_candidates.append(UNetSegmentationModel())
         except (ImportError, OSError):
-            registry["chest_xray"] = [StubSpecialistModel(
-                "chest-xray", "chest_xray", "classification", CXR_CLASSES, "DenseNet201ChestXrayModel")]
-        try:
-            registry["retina"] = [ResNet50RetinaModel()]
-        except (ImportError, OSError):
-            registry["retina"] = [StubSpecialistModel(
-                "retina", "retina", "classification", RETINA_CLASSES, "ResNet50RetinaModel")]
-        try:
-            registry["skin"] = [EfficientNetSkinLesionModel()]
-        except (ImportError, OSError):
-            registry["skin"] = [StubSpecialistModel(
-                "skin", "skin", "classification", SKIN_CLASSES, "EfficientNetSkinLesionModel")]
-        try:
-            registry["ct_scan"] = [UNetSegmentationModel()]
-        except (ImportError, OSError):
-            registry["ct_scan"] = [StubSpecialistModel(
-                "ct-scan", "ct_scan", "segmentation", ["region_flagged", "no_region_flagged"], "UNetSegmentationModel")]
-    else:
-        registry["chest_xray"] = [StubSpecialistModel(
-            "chest-xray", "chest_xray", "classification", CXR_CLASSES, "DenseNet201ChestXrayModel")]
-        registry["retina"] = [StubSpecialistModel(
-            "retina", "retina", "classification", RETINA_CLASSES, "ResNet50RetinaModel")]
-        registry["skin"] = [StubSpecialistModel(
-            "skin", "skin", "classification", SKIN_CLASSES, "EfficientNetSkinLesionModel")]
-        registry["ct_scan"] = [StubSpecialistModel(
-            "ct-scan", "ct_scan", "segmentation", ["region_flagged", "no_region_flagged"], "UNetSegmentationModel")]
+            pass
+    if not ct_scan_candidates:
+        ct_scan_candidates.append(StubSpecialistModel(
+            "ct-scan", "ct_scan", "segmentation", ["region_flagged", "no_region_flagged"], "UNetSegmentationModel"))
+    registry["ct_scan"] = ct_scan_candidates
 
     # --- SOTA foundation-model specialists — new modalities, additive to the
     # ones above (not replacements: chest_xray/retina/skin/ct_scan keep
@@ -155,6 +225,19 @@ def build_registry(fitted_vitals_model=None) -> dict[str, list]:
         registry["pathology_omics"] = [StubSpecialistModel(
             "omiclip", "pathology_omics", "classification",
             ["concordant", "discordant"], "OmiCLIPModel")]
+
+    # --- Genomic variant track (new — see docs/model-algorithm-catalog.md's
+    # "still missing entirely" row and foundation_evo2.py's module docstring
+    # for how this complements, rather than replaces in-place, module6's
+    # Random Forest GenomicExpressionModel). No legacy fallback registered
+    # here since nothing in this zoo previously covered variant-level
+    # genomic input — only the stub-degrade tier applies.
+    try:
+        registry["genomic_variant"] = [Evo2VariantModel()]
+    except (ImportError, OSError):
+        registry["genomic_variant"] = [StubSpecialistModel(
+            "evo2", "genomic_variant", "classification",
+            ["likely_benign", "uncertain_significance", "likely_pathogenic"], "Evo2VariantModel")]
 
     return registry
 

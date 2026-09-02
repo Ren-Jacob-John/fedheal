@@ -14,3 +14,14 @@ pandas==2.2.3
 # torch>=2.2
 # torchvision>=0.17
 # transformers>=4.40  # for BiomedCLIP/MedGemma/CONCH — see catalog Sections 1, 3, 6
+
+# --- Needed only for the current-tier foundation-model specialists added in
+# this modernization pass (models/foundation_*.py) — see
+# docs/model-algorithm-catalog.md and docs/foundation-models-status.md for
+# what's real vs. blocked-here for each. Also needs huggingface.co network
+# access (for weights) and a GPU (practically, for all but TabPFN) — none
+# available in this sandbox, so every one of these degrades to the legacy
+# model or a StubSpecialistModel automatically via registry.py.
+# open_clip_torch>=2.24   # BiomedCLIP — imaging_chest_xray/retina/skin upgrade
+# nnunetv2>=2.5            # nnU-Net — imaging_segmentation.py upgrade (needs a hospital's own trained model folder)
+# evo2                     # Evo 2 — new genomic_variant specialist (needs a supported GPU, per its own README)

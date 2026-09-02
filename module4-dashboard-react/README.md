@@ -1,8 +1,11 @@
-# Module 4 (v2) — Federation Map
+# Module 4 — Federation Map
 
-A spatial replacement for the plain-HTML `module4-dashboard`, built in
-React + Vite. Same job — log in, upload vitals, see your hospital's status
-— plus a live view of the whole federation for the platform operator.
+The project's one hospital dashboard, built in React + Vite. Log in,
+upload vitals, see your hospital's status — plus a live view of the whole
+federation for the platform operator. (This started as a spatial
+replacement for an earlier plain-HTML dashboard; that version has since
+been removed now that this one is confirmed fully wired to Module 1 and
+Module 7's real APIs — see the root README's module list.)
 
 ## Why spatial
 

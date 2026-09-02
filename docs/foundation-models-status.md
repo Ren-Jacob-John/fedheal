@@ -78,3 +78,56 @@ for Mamba-Health; general cross-modal fusion for MICViT)? Writing
 integration code against a name with no real implementation behind it
 would mean inventing an API — same failure mode as everything else this
 doc is trying to avoid.
+
+## Modernization pass: BiomedCLIP / nnU-Net / Evo 2 / UNI2-h
+
+A separate pass from the six models above — this one implements
+`docs/model-algorithm-catalog.md`'s upgrade recommendations for the
+*existing* legacy imaging/segmentation/histopathology specialists, plus
+one genuinely new specialist (Evo 2), rather than wiring in more
+originally-requested SOTA models. Same standard applied throughout: real,
+verified loading snippets from each model's own documentation, honestly
+marked untested where this sandbox can't run them, no fabricated APIs.
+
+| Model | Repo / model card | Upgrades | What's actually wired |
+|---|---|---|---|
+| **BiomedCLIP** | [microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224](https://huggingface.co/microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224) (via `open_clip`) | `DenseNet201ChestXrayModel`, `ResNet50RetinaModel`, `EfficientNetSkinLesionModel` | Real loading (`open_clip.create_model_from_pretrained("hf-hub:microsoft/BiomedCLIP-...")`, copied from the model card's own quick-start) + a real, from-scratch-trainable `Conv1d`-based fine-tuned head (the "CNN+ViT hybrid" the project's instructions asked for) operating on `encode_image()`'s documented pooled output — see `module5-modelzoo/models/foundation_biomedclip.py` |
+| **nnU-Net (v2)** | [MIC-DKFZ/nnUNet](https://github.com/MIC-DKFZ/nnUNet), pip `nnunetv2` | `UNetSegmentationModel` | Real loading via `nnunetv2.inference.predict_from_raw_data.nnUNetPredictor`, copied from the package's own documented inference API. Genuinely different from the other rows here: nnU-Net is a *training framework*, not a downloadable pretrained checkpoint — there's no default weights to ship, `FEDHEAL_NNUNET_MODEL_FOLDER` must point at a model folder a hospital already trained on its own labeled data. See `module5-modelzoo/models/foundation_nnunet.py` |
+| **UNI2-h** (patch encoder) | [MahmoodLab/UNI2-h](https://huggingface.co/MahmoodLab/UNI2-h) (via `timm`) | `HistopathologyMILModel` (module6) | Real loading (`timm.create_model("hf-hub:MahmoodLab/UNI2-h", pretrained=True, ...)`, copied from the model card), feeding a real CLAM-style *gated*-attention MIL head (an upgrade from the legacy model's plain softmax attention). Virchow2/Prov-GigaPath are equivalent-tier, same-shape alternatives, selectable via `FEDHEAL_PATHOLOGY_ENCODER_HUB_ID` if one of those is already HF-authorized for a given deployment instead. See `module6-condition-router/models/foundation_pathology_mil.py` |
+| **Evo 2** | [ArcInstitute/evo2](https://github.com/ArcInstitute/evo2), pip `evo2` | *(new — no legacy predecessor; fills the catalog's "still missing entirely" genomic-variant row)* | Real loading (`Evo2("evo2_7b")` + `score_sequences()`, copied from the repo's own quick-start) implementing the zero-shot variant-effect log-likelihood-ratio method from Evo 2's own paper. See `module5-modelzoo/models/foundation_evo2.py` |
+
+**All four auto-degrade** through the same `registry.py` /
+`condition_registry_builder.py` try/except pattern as the six models
+above — re-running both `module5-modelzoo/demo.py` and
+`module6-condition-router/demo.py` after wiring them in confirms: the new
+`genomic_variant` modality appears in module5's registry (`real: False`
+here), the two new `genomic_variant_breast_cancer`/`genomic_variant_
+leukemia` specialist_ids fire in module6's breast-cancer/leukemia demo
+output as labeled stubs, `histopathology_breast_cancer` still resolves
+(to the legacy `HistopathologyMILModel` stub, since UNI2-h isn't
+available here either), and every pre-existing modality/condition
+continues to behave exactly as before.
+
+### Why none of these four actually run here either
+
+Same three blockers as the six models above, plus one new one specific to
+nnU-Net:
+
+- **No GPU** — all four either need one outright (Evo 2, UNI2-h at
+  practical whole-slide scale) or strongly recommend one (BiomedCLIP,
+  nnU-Net).
+- **No Hugging Face access** — BiomedCLIP, UNI2-h, and Evo 2 all ship
+  weights on the HF Hub; UNI2-h's specifically is *gated* (requires
+  accepting MahmoodLab's terms + an authenticated `HF_TOKEN`), a step
+  beyond the plain network-access blocker the other models hit.
+- **nnU-Net has no default weights at all, by design** — it's a
+  self-configuring training framework, not a pretrained checkpoint. Even
+  with a GPU and full network access, `NNUNetSegmentationModel` correctly
+  raises until `FEDHEAL_NNUNET_MODEL_FOLDER` points at a model a hospital
+  has actually trained on its own labeled CT data — there's no honest way
+  to ship a generic pretrained nnU-Net the way the other three ship a
+  generic pretrained checkpoint.
+
+Real code, correctly written against each project's own documented API,
+honestly marked untested-in-this-sandbox — the same standard as every
+other entry in this file.

@@ -57,6 +57,50 @@ available in this environment, which is a graceful skip, not an error).
 attributions. An unregistered condition like "alien flu" → a clear error
 listing every known condition instead of a wrong guess.
 
+## This pass's modernization (per docs/model-algorithm-catalog.md)
+
+`condition_registry_builder.py` now builds the histopathology entry as a
+current-tier/legacy pair rather than one fixed model: it tries
+`FoundationPathologyMILModel` (real UNI2-h patch embeddings feeding an
+actual CLAM-style gated-attention head, replacing the legacy model's
+unspecified 512-dim patch-feature input and simpler softmax attention)
+first, and falls back to the legacy `HistopathologyMILModel` only if
+UNI2-h's dependencies aren't available — same `histopathology` modality
+string either way, so nothing downstream (fusion severity weights, the
+knowledge-graph ontology lookup) needed to change.
+
+It also now builds two new specialist_ids, `genomic_variant_breast_cancer`
+and `genomic_variant_leukemia`, from module5-modelzoo's new
+`Evo2VariantModel` (imported directly, the same way this module already
+reuses module5's vitals/chest_xray/retina/skin/ct_scan specialists). These
+are wired into `conditions.py`'s `breast_cancer`/`leukemia`
+`ConditionSpec`s *alongside* the existing Random Forest
+`genomic_breast_cancer`/`genomic_leukemia` entries, not in place of them —
+Evo 2 needs variant-call sequence data, the RF model needs an expression
+panel, and `condition_router.route()`'s existing "skip specialist_ids the
+caller didn't supply data for" behavior means both simply fire when their
+matching data is present, with no changes needed to `condition_router.py`
+itself. The RF models stay registered specifically because the project's
+own instructions call for keeping them as the fallback for small
+cohorts/expression-panel-only hospital deployments.
+
+One explicit, documented gap this introduces: `fusion.py`'s
+`SEVERITY_WEIGHTS` and `knowledge_graph_reasoner.py`'s `ONTOLOGY_LOOKUP`
+weren't touched this pass (per the project's instruction to leave both
+alone), so `genomic_variant` findings currently fuse at the neutral 0.5
+weight and get a "no ontology entry yet" stub `Explanation` rather than a
+real one — visible directly in `demo.py`'s output. This mirrors exactly
+the gap `docs/module8-code-review-notes.md` already documents fixing for
+`genomic`/`histopathology`/`cbc` when Module 6 first added them; the fix
+is the same kind of follow-up, just not done in this pass.
+
+Everything else about how this module works — the auto-switch table, the
+condition-router logic, all three explainer implementations — is
+unchanged: new specialists plug into the existing
+`specialist_id -> SpecialistModel` registry and `ConditionSpec.specialist_ids`
+list, exactly the extension path this module's own README already
+documents for adding any new condition or specialist.
+
 ## How other modules depend on it
 
 Nothing else in the current build calls into this module yet — it's the

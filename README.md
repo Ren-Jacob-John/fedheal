@@ -96,20 +96,36 @@ hospital login to a continuously improving shared model:
    central process that averages them (**Federated Averaging / FedAvg**)
    into one improved global model, which is then sent back out for
    another round.
-4. **Hospital dashboard** (`module4-dashboard/`, plain HTML/JS; a React
-   rebuild lives in `module4-dashboard-react/`) — the interface a
+4. **Hospital dashboard** (`module4-dashboard-react/`) — the interface a
    clinician or hospital admin uses to log in, upload vitals, and see
-   their hospital's status and validated-record count. The React version
-   adds a spatial "federation map" — every hospital as a node in orbit
-   around the shared model, live status, and an architecture view of all
-   seven modules — see its own README for the design rationale.
+   their hospital's status and validated-record count, plus a spatial
+   "federation map" — every hospital as a node in orbit around the shared
+   model, live status, and an architecture view of all seven modules — see
+   its own README for the design rationale. The original plain-HTML
+   `module4-dashboard/` has been removed: it was confirmed fully
+   superseded (same job, same API contracts against Module 1 and Module 7
+   — see `module4-dashboard-react/README.md`'s "What's role-gated, and
+   why" table), and the project consolidates on one dashboard going
+   forward rather than maintaining both long-term.
 5. **Model zoo & task router** (`module5-modelzoo/`) — a library of
    specialist models (one per data modality: vitals, chest X-ray, retina,
-   skin, segmentation, plus four SOTA foundation-model additions — RadFM,
-   BiomedParse, SegVol, OmiCLIP — see `docs/foundation-models-status.md`
-   for what's real vs. blocked among those) behind one common interface,
-   with a router that sends each case to the specialist actually built
-   for it.
+   skin, segmentation, genomic variants, plus four SOTA foundation-model
+   additions — RadFM, BiomedParse, SegVol, OmiCLIP — see
+   `docs/foundation-models-status.md` for what's real vs. blocked among
+   those) behind one common interface, with a router that sends each case
+   to the specialist actually built for it. As of this modernization pass,
+   the legacy DenseNet201/ResNet50/EfficientNet imaging specialists and
+   the custom U-Net segmentation model are joined by current-tier
+   upgrades — BiomedCLIP embeddings + a fine-tuned CNN+ViT-hybrid head for
+   imaging, nnU-Net for segmentation, Evo 2 for genomic variant-effect
+   prediction — registered as the primary path with the legacy models
+   kept as the auto-degrade fallback tier; see
+   `docs/model-algorithm-catalog.md`'s "What's actually outdated" table
+   and this module's own README/EXPLANATION for exactly what changed.
+   **The specialist + router + fusion architecture itself is unchanged** —
+   every new model, including the CNN+ViT hybrid, plugs in as one more
+   specialist behind the same `SpecialistModel` interface, never a
+   replacement for it.
 6. **Condition router** (`module6-condition-router/`) — given a disease
    name (e.g. "breast cancer", "leukemia"), automatically pulls in every
    specialist model and every explanation method (SHAP, Grad-CAM,
@@ -283,9 +299,9 @@ named. Every future stage should pick its model(s) from this document.
 | **P1 — Backend/Auth** | Authentication & Multi-Tenancy | `module1-auth/` | ✅ Done & tested. Hospital register/login/JWT, hospital-scoped endpoints. |
 | **P2 — Data Engineer** | Data Ingestion & Validation | `module2-validation/` | ✅ Done & tested. Schema, range, consistency, and outlier checks. |
 | **P3 — ML Engineer** | Local Training + Federated Aggregation | `module3-fedlearning/` | ✅ Done & tested. Working FedAvg simulation, 3 hospitals, non-IID data. |
-| **P4 — Frontend** | Hospital Dashboard | `module4-dashboard/` | ✅ Done & tested. Plain HTML/JS wired to Module 1's real API. |
-| **P3 (cont.) — ML Engineer** | Model Zoo & Task Router | `module5-modelzoo/` | ✅ Done & tested. XGBoost + TabPFN v2 (both real) + DenseNet201/ResNet50/EfficientNet/U-Net (real code, stubbed in this sandbox) + RadFM/BiomedParse/SegVol/OmiCLIP (real loading code added, stubbed here — see `docs/foundation-models-status.md`) coexisting via a router + fusion layer. |
-| **P3 (cont.) — ML Engineer** | Condition Router (auto-switch by disease) | `module6-condition-router/` | ✅ Done & tested. Mention a disease (breast cancer, leukemia, diabetic retinopathy, etc.) and it auto-routes to the right specialist(s) + reasoning method(s) — see its README for the 5 verified condition pathways. |
+| **P4 — Frontend** | Hospital Dashboard | `module4-dashboard-react/` | ✅ Done & tested. React "federation map," wired to Module 1 + Module 7's real APIs. The original plain-HTML dashboard was removed once this was confirmed fully wired — see the module's README. |
+| **P3 (cont.) — ML Engineer** | Model Zoo & Task Router | `module5-modelzoo/` | ✅ Done & tested. XGBoost + TabPFN v2 (both real) + legacy DenseNet201/ResNet50/EfficientNet/U-Net + current-tier BiomedCLIP (CNN+ViT-hybrid head)/nnU-Net upgrades (real code, both tiers stubbed in this sandbox, current-tier preferred automatically when available) + Evo 2 genomic-variant specialist (new) + RadFM/BiomedParse/SegVol/OmiCLIP (real loading code added, stubbed here — see `docs/foundation-models-status.md`) coexisting via one unchanged router + fusion layer. |
+| **P3 (cont.) — ML Engineer** | Condition Router (auto-switch by disease) | `module6-condition-router/` | ✅ Done & tested. Mention a disease (breast cancer, leukemia, diabetic retinopathy, etc.) and it auto-routes to the right specialist(s) + reasoning method(s) — see its README for the verified condition pathways. Histopathology now defaults to a UNI2-h + CLAM-style MIL specialist (legacy attention-MIL kept as fallback), and breast cancer/leukemia gained an Evo 2 genomic-variant track alongside the existing Random Forest expression-panel model. |
 | **P1 (cont.) — Backend/Auth** | Admin / Platform Module (the operator's view) | `module7-admin/` | ✅ Done & tested. Hospital oversight (proxies Module 1), training-round history, validation-flag summaries, and a working "trigger a round" endpoint. First real cross-module wiring — see its README for exactly what's real. |
 | — | Synthesis / Review-Packet Layer | `module8-synthesis/` | ✅ Done & tested. Aggregates Module 5/6 findings into a clinician review packet — no diagnosis, no treatment plan, `requires_clinician_review` hardcoded true. See its README. |
 
@@ -342,11 +358,7 @@ cd module3-fedlearning && pip install -r requirements.txt --break-system-package
 python simulate.py          # synthetic data, no dependencies on other modules
 python simulate_real.py     # real hospital data — needs Module 1 + Module 2 running first
 
-# Module 4 — Dashboard (no build step, just open it)
-cd module4-dashboard && python -m http.server 8080
-# then open http://localhost:8080
-
-# Module 4 (v2) — Federation Map, React (see module4-dashboard-react/README.md)
+# Module 4 — Dashboard, React "Federation Map" (see module4-dashboard-react/README.md)
 cd module4-dashboard-react && npm install
 npm run dev          # http://localhost:5173
 

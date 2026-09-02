@@ -11,3 +11,18 @@ lifelines==0.30.3
 # (both fall back to a labeled stub automatically if these aren't installed):
 # torch>=2.2
 # torchvision>=0.17
+
+# Needed only for the current-tier histopathology upgrade
+# (models/foundation_pathology_mil.py — UNI2-h/Virchow2/Prov-GigaPath patch
+# embeddings + CLAM-style MIL head). Also needs huggingface.co network
+# access + HF Hub authorization for the gated weights + a GPU for practical
+# whole-slide inference — falls back to the legacy attention-MIL specialist
+# automatically if unavailable, see that file's module docstring.
+# timm>=1.0
+
+# Needed only for the new genomic_variant_breast_cancer / genomic_variant_leukemia
+# specialists (Evo 2, imported from module5-modelzoo — see
+# module5-modelzoo/models/foundation_evo2.py). Falls back to the existing
+# Random Forest genomic_breast_cancer / genomic_leukemia specialists
+# automatically if unavailable.
+# evo2

@@ -24,18 +24,29 @@ CONDITION_REGISTRY: dict[str, ConditionSpec] = {
     "breast_cancer": ConditionSpec(
         canonical_name="breast_cancer",
         aliases=["breast cancer", "breast carcinoma", "brca"],
-        specialist_ids=["histopathology_breast_cancer", "genomic_breast_cancer"],
+        specialist_ids=["histopathology_breast_cancer", "genomic_variant_breast_cancer",
+                         "genomic_breast_cancer"],
         explainer_names=["grad_cam", "shap", "knowledge_graph"],
-        notes="Histopathology (MIL) for tissue diagnosis + genomic model for BRCA-risk "
-              "subtyping — see docs/model-algorithm-catalog.md Section 12.",
+        notes="Histopathology (UNI2-h + CLAM-style MIL, current-tier — falls back to the "
+              "legacy attention-MIL model, see foundation_pathology_mil.py) for tissue "
+              "diagnosis + Evo 2 (genomic_variant_breast_cancer, current-tier — needs "
+              "variant-call data) for BRCA1/2 variant-effect prediction + the Random "
+              "Forest genomic_breast_cancer model (kept registered as the fallback for "
+              "small cohorts / expression-panel-only data, per docs/model-algorithm-"
+              "catalog.md Section 5) — see docs/model-algorithm-catalog.md Section 12. "
+              "knowledge_graph has no ONTOLOGY_LOOKUP entries yet for genomic_variant "
+              "labels — see that finding's Explanation.is_stub in the report until "
+              "someone extends knowledge_graph_reasoner.py.",
     ),
     "leukemia": ConditionSpec(
         canonical_name="leukemia",
         aliases=["leukaemia", "blood cancer", "aml", "all"],
-        specialist_ids=["cbc_leukemia", "genomic_leukemia"],
+        specialist_ids=["cbc_leukemia", "genomic_variant_leukemia", "genomic_leukemia"],
         explainer_names=["shap", "knowledge_graph"],
-        notes="CBC/blood-count model for initial suspicion + genomic model for "
-              "molecular subtyping (AML vs ALL).",
+        notes="CBC/blood-count model for initial suspicion + Evo 2 (genomic_variant_"
+              "leukemia, current-tier — cytogenetic/molecular variant calls) + the "
+              "Random Forest genomic_leukemia model (kept registered as the fallback "
+              "for small cohorts / expression-panel-only data) for subtyping (AML vs ALL).",
     ),
     "diabetic_retinopathy": ConditionSpec(
         canonical_name="diabetic_retinopathy",

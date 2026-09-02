@@ -53,6 +53,58 @@ specialist built for it.
 - **`fusion.py`** combines multiple specialists' outputs into one overall
   assessment, for cases that involve more than one data type.
 
+## This pass's modernization (per docs/model-algorithm-catalog.md)
+
+The architecture described above — specialist library + router + fusion —
+is unchanged; this pass only changed *which* architectures sit behind
+`SpecialistModel` for a few modalities, plus added one new modality:
+
+- **`chest_xray`/`retina`/`skin`**: `foundation_biomedclip.py` adds
+  BiomedCLIP-backed specialists as the current-tier default, per the
+  catalog's finding that foundation-model embeddings now outperform
+  ImageNet-pretrained CNNs on medical images specifically. The
+  classification head fine-tuned on top of BiomedCLIP's frozen ViT is
+  itself a small CNN (`nn.Conv1d` mixing five-crop embeddings) — a
+  genuine CNN+ViT hybrid, built the way the catalog specifies: fine-tuned
+  on a medically-pretrained foundation model, not trained from scratch on
+  ImageNet-style data. `DenseNet201ChestXrayModel`/`ResNet50RetinaModel`/
+  `EfficientNetSkinLesionModel` stay registered, one tier down, as the
+  fallback for hospitals without GPU/`huggingface.co` access.
+- **`ct_scan`**: `foundation_nnunet.py` adds nnU-Net as the current-tier
+  default for hospitals with real labeled segmentation data (the catalog's
+  own carve-out — nnU-Net still competes with or beats SAM2 there). The
+  custom `UNetSegmentationModel` stays registered as the fallback for
+  hospitals without a trained nnU-Net model folder yet. For prompted/
+  volumetric segmentation without much labeled data, the already-
+  scaffolded `BiomedParseModel`/`SegVolModel` (separate `prompted_
+  segmentation`/`ct_volumetric` modalities, added in an earlier pass) are
+  the catalog's other current-tier option — this pass didn't need to
+  touch those, they already existed.
+- **`genomic_variant`** (new): `foundation_evo2.py` fills the gap the
+  catalog explicitly flagged as "still missing entirely" — a real
+  variant-effect track (Evo 2, covering BRCA1/2 and noncoding variants),
+  distinct from and complementary to Module 6's existing Random Forest
+  `GenomicExpressionModel` (which classifies an expression panel, a
+  different input entirely — see `foundation_evo2.py`'s own docstring).
+- **Audited, nothing removed**: the outdated architectures named in the
+  project's removal instructions (Inception v3/v4, VGG16/19, Capsule
+  Networks, Mask R-CNN, DeepLab v3/v3+, early fusion, TabNet, plain
+  MLP-on-tabular, SVM-on-tabular) were searched for across this module and
+  the rest of the repo and confirmed never actually implemented here —
+  only referenced in the catalog's own reference menu of what not to
+  reach for. There was nothing to delete.
+- **Deliberately untouched, per the project's own instructions**: `SHAP`,
+  Grad-CAM, `fusion.py`'s late-fusion approach, and `module3-fedlearning`'s
+  logistic-regression/SGDClassifier federated baseline — these are
+  documented, deliberate design choices in this codebase (interpretability
+  and federation-friendliness), not outdated code. One consequence worth
+  flagging: `fusion.py`'s `SEVERITY_WEIGHTS` table has no entries yet for
+  the new `genomic_variant` modality/label pairs, so those findings
+  currently fall back to fusion's documented neutral weight (0.5) until a
+  clinician reviews and adds real weights — the same gap-then-fix pattern
+  `docs/module8-code-review-notes.md` already describes for `genomic`/
+  `histopathology`/`cbc` when Module 6 first added them.
+
 ## How other modules depend on it
 
 - **Module 6** (condition router) imports this module's specialists and
@@ -66,9 +118,11 @@ specialist built for it.
 ## What's real vs. what's a known prototype simplification
 
 Real: the `SpecialistModel` interface, the XGBoost vitals specialist end
-to end, the router and fusion logic, and the *code* for all four imaging
-specialists (just not execution-tested without torch installed in this
-environment). Documented as next-sprint work in this folder's
+to end, the router and fusion logic, and the *code* for all four legacy
+imaging specialists plus this pass's BiomedCLIP/nnU-Net/Evo 2 additions
+(just not execution-tested without their respective dependencies — torch,
+`open_clip_torch`, `nnunetv2`, `evo2` — installed in this environment).
+Documented as next-sprint work in this folder's
 `README.md`: verifying the imaging specialists actually run forward
 passes once torch is installed; wiring real (validated) data into cases
 instead of demo inputs; federating each imaging specialist the same way
