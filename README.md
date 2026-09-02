@@ -100,7 +100,7 @@ hospital login to a continuously improving shared model:
    clinician or hospital admin uses to log in, upload vitals, and see
    their hospital's status and validated-record count, plus a spatial
    "federation map" — every hospital as a node in orbit around the shared
-   model, live status, and an architecture view of all seven modules — see
+   model, live status, and an architecture view of all eight modules — see
    its own README for the design rationale. The original plain-HTML
    `module4-dashboard/` has been removed: it was confirmed fully
    superseded (same job, same API contracts against Module 1 and Module 7
@@ -209,22 +209,27 @@ The system follows this end-to-end flow:
 |---|---|---|
 | Federated coordination | **Federated Averaging (FedAvg)** across a non-IID (Dirichlet-partitioned) simulation of hospitals | [Flower](https://flower.dev/) (`server.py` reference implementation), scikit-learn |
 | Local/global model (tabular vitals) | Logistic regression (`SGDClassifier`) — chosen so weights are a simple flat array, easy to average correctly | scikit-learn |
-| Structured/tabular specialist | Gradient-boosted trees | XGBoost |
+| Structured/tabular specialist (current tier) | TabPFN v2 in-context tabular foundation model | `tabpfn` |
+| Structured/tabular specialist (fallback) | Gradient-boosted trees | XGBoost |
 | CBC / blood-count specialist (leukemia) | Gradient-boosted trees | LightGBM |
 | Genomic/expression classifier (breast cancer risk, leukemia subtyping) | Random Forest | scikit-learn |
-| Histopathology (whole-slide breast tissue) | Attention-based Multiple-Instance Learning (MIL) | PyTorch |
-| Chest X-ray classification | DenseNet201 (transfer learning) | PyTorch / torchvision |
-| Retinal disease grading | ResNet50 (transfer learning) | PyTorch / torchvision |
-| Skin lesion classification | EfficientNet-B0 (transfer learning) | PyTorch / torchvision |
-| Pixel-level image segmentation | Custom U-Net | PyTorch |
+| Genomic variant-effect (BRCA1/2, cytogenetics) | Evo 2 (zero-shot log-likelihood-ratio scoring) | `evo2` |
+| Histopathology (whole-slide breast tissue, current tier) | UNI2-h patch embeddings + CLAM-style gated-attention MIL | PyTorch / `timm` |
+| Histopathology (fallback) | Attention-based MIL | PyTorch |
+| Chest X-ray / retina / skin (current tier) | BiomedCLIP embeddings + fine-tuned CNN+ViT-hybrid head | `open_clip_torch` / PyTorch |
+| Chest X-ray / retina / skin (fallback) | DenseNet201 / ResNet50 / EfficientNet-B0 (ImageNet transfer learning) | PyTorch / torchvision |
+| Pixel-level segmentation (current tier) | nnU-Net v2 (hospital-trained model folder) | `nnunetv2` |
+| Pixel-level segmentation (fallback) | Custom U-Net | PyTorch |
+| Foundation-model additions (RadFM, BiomedParse, SegVol, OmiCLIP) | Radiology VQA, text-prompted segmentation, volumetric CT, pathology/omics alignment — see `docs/foundation-models-status.md` for what's runnable vs. stubbed | Mixed (cloned repos, `transformers`, HF Hub) |
 | Batch-level anomaly detection | Isolation Forest | scikit-learn |
 | Explainability — tabular/tree models | SHAP (feature attribution) | SHAP |
 | Explainability — imaging models | Grad-CAM (pixel-level attribution) | PyTorch |
 | Explainability — clinical reasoning | Rule-based knowledge-graph reasoner (ICD-10-style codes, plain-language reasoning, suggested next steps) | Custom |
+| Clinician review packet | Structured synthesis of Module 5/6 findings (no diagnosis, `requires_clinician_review` hardcoded) | Custom (`module8-synthesis/`) |
 | API services | REST APIs for auth, validation, admin | FastAPI, Pydantic, SQLAlchemy |
 | Auth & security | Password hashing, signed tokens | bcrypt, JWT |
 | Data storage | Relational database | PostgreSQL/Supabase (falls back to SQLite for local dev) |
-| Frontend | Hospital-facing dashboard | Plain HTML/JavaScript (`fetch` against Module 1's API) |
+| Frontend | Hospital + operator dashboard (federation map, vitals upload, super-admin views) | React + Vite (`module4-dashboard-react/`, wired to Module 1 + Module 7) |
 
 See `docs/model-algorithm-catalog.md` for the full catalog of model
 families relevant to future disease specialists (imaging, tabular/EHR,
@@ -271,13 +276,13 @@ fusion, and additional explainability/reasoning methods).
   SegVol, OmiCLIP, MeDiM, plus two unresolved names) — what's real code
   vs. blocked upstream vs. unverified.
 - **`docs/module8-code-review-notes.md`** — code review findings from
-  building Module 8, including a fusion-severity-table bug found and
-  fixed in `module5-modelzoo/fusion.py`.
-- **Every `moduleN-*/EXPLANATION.md`** — a full, presentation-ready
-  explanation of what that module does, how it works, and how it connects
-  to the rest of the system. (`moduleN-*/README.md` stays the terse,
-  dev-facing "how to run this" reference — the two are meant to be read
-  together, not as duplicates.)
+  building Module 8, including fusion-severity-table gaps found and fixed
+  in `module5-modelzoo/fusion.py` (Module 6 modalities and `genomic_variant`).
+- **`moduleN-*/EXPLANATION.md`** (modules 1–8) — a full, presentation-ready
+  presentation-ready explanation of what that module does, how it works,
+  and how it connects to the rest of the system. (`moduleN-*/README.md`
+  stays the terse, dev-facing "how to run this" reference — the two are
+  meant to be read together, not as duplicates.)
 
 ## Model / algorithm / framework catalog
 

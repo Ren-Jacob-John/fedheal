@@ -33,13 +33,15 @@ python demo.py
 | `models/stub.py` | Placeholder used only when a real specialist's dependencies aren't installed |
 | `registry.py` | Builds `{modality: [SpecialistModel, ...]}` — the model zoo itself. Candidate lists are current-tier-first, legacy-fallback-second (see registry.py's own module docstring) |
 | `router.py` | `MetadataRouter` — picks the right specialist(s) for a case. **Unchanged this pass** — every new model plugs in as a registry entry, not a router change |
-| `fusion.py` | Combines multiple specialists' outputs into one overall risk assessment — see `docs/module8-code-review-notes.md` for a severity-table gap found and fixed here. **Unchanged this pass** (per the project's own instruction — late fusion here is a deliberate design choice, not outdated); note the new `genomic_variant` modality currently has no `SEVERITY_WEIGHTS` entries, same documented-gap pattern as when `genomic`/`histopathology`/`cbc` were first added |
+| `fusion.py` | Combines multiple specialists' outputs into one overall risk assessment — see `docs/module8-code-review-notes.md` for a severity-table gap found and fixed here, and for remaining `genomic_variant` ontology follow-up. **Unchanged this pass** (per the project's own instruction — late fusion here is a deliberate design choice, not outdated) |
 | `demo.py` | **Run this.** Proves all specialists coexist and are correctly routed |
 
-Eleven modalities total now (vitals, four imaging classification slots each
-with a current+legacy tier, `ct_scan` segmentation with a current+legacy
-tier, four foundation-model additions, plus the new `genomic_variant`
-track) — up from the original five modalities / nine specialist entries.
+**10 registry modalities** in `registry.py` (`vitals`, `chest_xray`,
+`retina`, `skin`, `ct_scan`, `radiology_vqa`, `prompted_segmentation`,
+`ct_volumetric`, `pathology_omics`, `genomic_variant` — imaging/
+segmentation slots each carry a current-tier + legacy pair where
+applicable) and **14+ model implementations** under `models/` — up from
+the original five modalities / nine specialist files.
 See `docs/foundation-models-status.md` for exactly which of the
 foundation-model additions are real-but-unavailable-here vs. genuinely
 blocked upstream (MeDiM) vs. unresolved (Mamba-Health/MICViT, requested
@@ -82,8 +84,9 @@ families to remove.
 
 ## Why the imaging specialists are stubs when you run this
 
-This model zoo now spans nine specialist entries. Only two — XGBoost and
-TabPFN for vitals — are lightweight enough to actually install and run in
+This model zoo now spans **10 registry modalities** and **14+ model
+files** under `models/`. Only two lightweight tabular specialists —
+XGBoost and TabPFN for vitals — are guaranteed to install and run in
 every environment. DenseNet201, ResNet50, EfficientNet, and U-Net need
 `torch` + `torchvision`, which are large (multi-GB with CUDA
 dependencies) and weren't installed when this was built (disk-constrained

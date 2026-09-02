@@ -10,12 +10,12 @@ training a CNN/tree from scratch per hospital.
 **Purpose of this document:** every future stage/week of development pulls
 its model choices from (or explicitly extends) this list. It's not limited
 to what's already implemented in `module5-modelzoo` — that module now has
-9 specialist entries spanning several generations (XGBoost, TabPFN v2,
-DenseNet201, ResNet50, EfficientNet, U-Net, plus RadFM/BiomedParse/
-SegVol/OmiCLIP added most recently — see
-`docs/foundation-models-status.md` for which of those actually run vs.
-are real-but-unavailable-here vs. blocked upstream). This document is the
-full menu, current generation.
+**10 registry modalities** and **14+ model implementations** spanning
+several generations (XGBoost, TabPFN v2, DenseNet201, ResNet50,
+EfficientNet, U-Net, BiomedCLIP, nnU-Net, Evo 2, plus RadFM/BiomedParse/
+SegVol/OmiCLIP — see `docs/foundation-models-status.md` for which of
+those actually run vs. are real-but-unavailable-here vs. blocked upstream).
+This document is the full menu, current generation.
 
 Two things every disease-specific pipeline needs, per the project's own
 framing ("a prediction a doctor can check, not a black box"):

@@ -91,14 +91,9 @@ telling the caller exactly what's missing and where to add it
   updated notes. The RF models are explicitly kept per the project's own
   instruction, as the fallback for small cohorts / expression-panel-only
   hospital deployments.
-- **Known gap this introduces**: `fusion.py`'s `SEVERITY_WEIGHTS` table
-  and `knowledge_graph_reasoner.py`'s `ONTOLOGY_LOOKUP` have no entries
-  yet for the new `genomic_variant` modality/labels — per the project's
-  instruction not to touch either file this pass, those findings
-  currently fuse at the neutral 0.5 weight and get a "no ontology entry
-  yet" stub explanation. Extending both tables is flagged as follow-up
-  work, the same way `docs/module8-code-review-notes.md` documents doing
-  for `genomic`/`histopathology`/`cbc` when they were first added.
+- **Known gap (addressed):** `fusion.py`'s `SEVERITY_WEIGHTS` table and
+  `knowledge_graph_reasoner.py`'s `ONTOLOGY_LOOKUP` now include
+  `genomic_variant` entries — see `docs/module8-code-review-notes.md`.
 
 ## Known simplifications (next sprint)
 

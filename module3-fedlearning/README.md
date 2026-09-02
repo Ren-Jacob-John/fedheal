@@ -79,7 +79,7 @@ cd module1-auth && uvicorn main:app --port 8001
 # terminal 2
 cd module2-validation && uvicorn main:app --port 8002
 # then, after creating >=2 hospitals and uploading >=10 vitals records each
-# via module4-dashboard's upload form (or curl — see module1-auth/README.md):
+# via module4-dashboard-react's upload form (or curl — see module1-auth/README.md):
 cd module3-fedlearning && python simulate_real.py
 ```
 

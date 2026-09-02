@@ -63,6 +63,16 @@ ONTOLOGY_LOOKUP: dict[tuple[str, str], tuple[str, str, str]] = {
     ("histopathology", "benign"): (
         "N60.9", "Tissue pattern consistent with benign breast tissue.",
         "Routine follow-up per screening guidelines."),
+    # --- Genomic variant track (Evo 2 — module5 foundation_evo2.py) ---
+    ("genomic_variant", "likely_pathogenic"): (
+        "Z15.01", "Variant-effect score consistent with a likely pathogenic mutation.",
+        "Refer for genetic counseling and confirmatory germline testing."),
+    ("genomic_variant", "uncertain_significance"): (
+        "Z15.09", "Variant-effect score is inconclusive (variant of uncertain significance).",
+        "Consider reclassification with updated databases; genetic counseling if clinically indicated."),
+    ("genomic_variant", "likely_benign"): (
+        "Z00.00", "Variant-effect score consistent with a likely benign variant.",
+        "No further genomic workup indicated based on this score alone."),
 }
 
 

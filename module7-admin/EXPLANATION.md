@@ -78,5 +78,8 @@ services can write this table" at prototype stage, not what you'd ship
 against real hospital data; the "trigger round" endpoint knows a training
 process *launched* but not whether it actually *succeeded* (a real job
 queue like Celery/RQ would fix this properly, matching Module 3's own
-planned graduation path); and there's no dedicated UI yet for any of
-this — it's the API a future admin screen in Module 4 would call.
+planned graduation path); the super_admin slice of Module 4's React
+dashboard already consumes this API (overview, rounds, flags, trigger-
+round, hospital status) — what's still missing is Module 8 synthesis
+rendering, explainer charts, and CSV upload (see week 14 in
+`docs/16-week-development-plan.md`).

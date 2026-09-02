@@ -1,11 +1,11 @@
 # Module 7 — Admin / Platform Module
 
-This is the 8th module from the original proposal ("Admin/Platform Module
-— you, the operator"), the one piece nothing else in the plan had built
-yet. Where Modules 1–6 each look inward at their own job (auth, one
-batch's validation, one federated round, one prediction), this module
-looks *across* all of them — it's the operator's one screen for "how
-healthy is the whole platform right now."
+Module 7 from the original proposal ("Admin/Platform Module — you, the
+operator"), the cross-cutting piece that gives a platform operator one
+screen across every other module. Where Modules 1–6 each look inward at
+their own job (auth, one batch's validation, one federated round, one
+prediction), this module looks *across* all of them — it's the operator's
+one view for "how healthy is the whole platform right now."
 
 It deliberately owns almost no data of its own. Hospital identity/status
 belongs to Module 1; this module just asks Module 1 for it, live, every
@@ -114,5 +114,9 @@ both unset to fall back to local SQLite.
   it started actually succeeded, only that it launched. A job-queue
   (Celery/RQ, same as Module 3's own planned graduation path) would fix
   this properly.
-- No UI yet — this is the API a `module4-dashboard` "admin" screen would
-  call; that screen itself isn't built.
+- No **standalone** admin app — the super_admin views (overview, rounds
+  history, validation flags, trigger-round, hospital activate/deactivate)
+  are already wired into `module4-dashboard-react` for `super_admin`
+  users. What's still missing: Module 8 synthesis reports, SHAP/Grad-CAM
+  chart rendering, and CSV upload (see `docs/16-week-development-plan.md`
+  week 14).

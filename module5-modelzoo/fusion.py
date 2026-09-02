@@ -31,7 +31,8 @@ from base import PredictionResult
 # below are placeholders in the same spirit as the rest of this table —
 # ordered so malignant/high-risk/AML-positive findings score higher than
 # their benign/low-risk counterparts — and still need clinical review
-# before this feeds any real fusion.
+# before this feeds any real fusion. Module 6's genomic_variant labels
+# (Evo 2) were added in the same follow-up pass.
 SEVERITY_WEIGHTS: dict[tuple[str, str], float] = {
     ("vitals", "high_risk"): 0.8,
     ("vitals", "low_risk"): 0.1,
@@ -58,6 +59,10 @@ SEVERITY_WEIGHTS: dict[tuple[str, str], float] = {
     ("genomic", "leukemia_subtype_all"): 0.75,
     ("cbc", "leukemia_suspected"): 0.75,
     ("cbc", "no_leukemia_suspected"): 0.05,
+    # --- Genomic variant track (Evo 2 — module5 foundation_evo2.py) ---
+    ("genomic_variant", "likely_pathogenic"): 0.85,
+    ("genomic_variant", "uncertain_significance"): 0.5,
+    ("genomic_variant", "likely_benign"): 0.05,
 }
 
 

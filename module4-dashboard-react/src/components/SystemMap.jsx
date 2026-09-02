@@ -47,7 +47,7 @@ const MODULES = [
     x: 800,
     y: 200,
     color: "var(--violet)",
-    desc: "One common interface over specialist models — vitals, chest X-ray, retina, skin, segmentation.",
+    desc: "One common interface over specialist models — vitals, imaging, segmentation, genomic variant, foundation models.",
   },
   {
     id: "m6",
@@ -67,6 +67,15 @@ const MODULES = [
     color: "var(--coral)",
     desc: "The operator's single view: hospital status, round-by-round accuracy, rolled-up validation flags.",
   },
+  {
+    id: "m8",
+    n: "8",
+    name: "Synthesis",
+    x: 620,
+    y: 520,
+    color: "var(--violet)",
+    desc: "Aggregates Module 5/6 findings into a clinician review packet — no diagnosis, requires_clinician_review always true.",
+  },
 ];
 
 const EDGES = [
@@ -77,6 +86,8 @@ const EDGES = [
   { from: "m2", to: "m7", label: "flag summaries, not records" },
   { from: "m1", to: "m7", label: "hospital directory (proxy)" },
   { from: "m6", to: "m5", label: "specialists + explainers" },
+  { from: "m6", to: "m8", label: "condition report" },
+  { from: "m8", to: "m4", label: "review packet (planned)" },
 ];
 
 function findModule(id) {

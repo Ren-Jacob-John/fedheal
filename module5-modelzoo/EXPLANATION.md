@@ -20,12 +20,13 @@ specialist built for it.
   Because every specialist implements the same interface, the router never
   needs to know or care which underlying architecture it's actually
   calling.
-- **`models/`** holds nine specialists: XGBoost and TabPFN v2 for
-  structured vitals (both fully real, no heavy dependencies), DenseNet201
-  (chest X-ray), ResNet50 (retinal disease grading), EfficientNet-B0
-  (skin lesion classification), and a custom U-Net (pixel-level
-  segmentation) for imaging, plus four SOTA foundation-model additions —
-  RadFM (radiology VQA), BiomedParse (text-prompted segmentation), SegVol
+- **`models/`** holds the full specialist library: TabPFN v2 and XGBoost
+  for structured vitals (both fully real, no heavy dependencies), legacy
+  DenseNet201 (chest X-ray), ResNet50 (retinal disease grading),
+  EfficientNet-B0 (skin lesion classification), and a custom U-Net
+  (pixel-level segmentation) for imaging, current-tier BiomedCLIP/nnU-Net/
+  Evo 2 upgrades, plus four SOTA foundation-model additions — RadFM
+  (radiology VQA), BiomedParse (text-prompted segmentation), SegVol
   (volumetric CT segmentation), and OmiCLIP (histopathology/omics
   alignment). The four original imaging models are real, correct
   torchvision transfer-learning code — but in the sandbox this was built
@@ -97,13 +98,7 @@ is unchanged; this pass only changed *which* architectures sit behind
   Grad-CAM, `fusion.py`'s late-fusion approach, and `module3-fedlearning`'s
   logistic-regression/SGDClassifier federated baseline — these are
   documented, deliberate design choices in this codebase (interpretability
-  and federation-friendliness), not outdated code. One consequence worth
-  flagging: `fusion.py`'s `SEVERITY_WEIGHTS` table has no entries yet for
-  the new `genomic_variant` modality/label pairs, so those findings
-  currently fall back to fusion's documented neutral weight (0.5) until a
-  clinician reviews and adds real weights — the same gap-then-fix pattern
-  `docs/module8-code-review-notes.md` already describes for `genomic`/
-  `histopathology`/`cbc` when Module 6 first added them.
+  and federation-friendliness), not outdated code.
 
 ## How other modules depend on it
 

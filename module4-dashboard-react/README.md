@@ -27,10 +27,10 @@ form-and-table dashboard hides that. This UI makes it literal:
 - **Rounds rail** — federated rounds plotted as a small spatial timeline
   (bar height = global accuracy) instead of a plain table, so an
   improving trend is something you see, not something you read.
-- **Architecture view** — a second, static spatial map of all seven
+- **Architecture view** — a second, static spatial map of all eight
   modules and exactly what crosses each line between them (a JWT, a
-  validated record, weights-only), for anyone trying to understand the
-  whole system, not just the hospital-facing slice of it.
+  validated record, weights-only, synthesis report), for anyone trying to
+  understand the whole system, not just the hospital-facing slice of it.
 - **Privacy is visible, not just true** — a non-admin hospital user sees
   every other hospital as a real node in the federation (so it's obvious
   they're not alone), but those nodes carry no status, no record counts,

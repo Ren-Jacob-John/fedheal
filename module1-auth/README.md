@@ -46,6 +46,7 @@ curl "localhost:8001/vitals/export?hospital_id=<hospital_id>" \
 |---|---|---|---|
 | `/hospitals` | POST | no (lock down later) | Onboard a new hospital tenant |
 | `/hospitals` | GET | no | List tenants |
+| `/hospitals/{id}` | PATCH | super_admin JWT | Activate/deactivate a hospital (used by Module 7's operator view) |
 | `/register` | POST | no | Create a user under a hospital |
 | `/token` | POST | no | Login, get JWT (OAuth2 password form: `username`, `password`) |
 | `/me` | GET | yes | Get current user's profile |

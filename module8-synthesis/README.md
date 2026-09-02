@@ -56,10 +56,11 @@ decision, not an oversight:
 
 ## Next sprint
 
-- Wire this into Module 4's dashboard as the actual rendered view
-  (currently the dashboard is plain HTML/JS per week 5's "no framework
-  yet" note in the 16-week plan — Module 8's `to_markdown()` output is a
-  reasonable stand-in until week 14's React rebuild).
+- Wire this into Module 4's React dashboard as the actual rendered view
+  for condition-routing results (the federation map, vitals upload, and
+  super_admin operator views already live in `module4-dashboard-react`;
+  synthesis is the main piece not yet connected). `to_markdown()` is a
+  reasonable stand-in for a first integration.
 - Add a persistence layer (Module 7 admin already has a DB) so a
   `SynthesisReport` can be stored with a clinician's eventual
   sign-off/override, closing the loop this module deliberately leaves

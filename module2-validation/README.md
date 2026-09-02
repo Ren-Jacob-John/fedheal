@@ -42,8 +42,10 @@ You should see: `P-001` passed, `P-002` rejected (height 400cm is impossible),
 
 - CSV upload endpoint (`UploadFile`), not just JSON — hospitals will mostly
   upload CSV exports from their own systems.
-- Wire the "passed" records to actually flow into Module 3's local training
-  step instead of stopping here.
+- ~~Wire the "passed" records to Module 3's local training step~~ — **done**
+  via Module 1's `POST /vitals/upload` → this service → stored per hospital
+  → Module 3's `real_data.py` reads them back through `GET /vitals/export`.
 - Send "flagged" records to the hospital dashboard (Module 4) for a human
-  to approve/reject rather than silently dropping them.
+  to approve/reject rather than silently dropping them (rolled-up flag counts
+  already reach Module 7; per-record review UI is still missing).
 - Same pipeline, adapted for imaging metadata once the imaging track starts.

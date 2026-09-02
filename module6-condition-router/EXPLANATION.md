@@ -18,12 +18,13 @@ That auto-switching is what this module implements.
   aliases, so "leukaemia" and "leukemia" both resolve) to the
   specialist(s) and reasoning method(s) it requires.
 - **`condition_registry_builder.py`** combines Module 5's existing
-  specialists (vitals, chest X-ray, retina, skin, CT) with three new ones
-  this module adds: a Random Forest genomic-expression classifier (reused
-  for both breast-cancer risk and leukemia subtyping via two separately
-  fitted instances), a LightGBM blood-count (CBC) classifier for leukemia,
-  and an attention-based multiple-instance-learning (MIL) model for
-  whole-slide breast-tissue histopathology.
+  specialists (vitals, chest X-ray, retina, skin, CT) with condition-
+  specific ones this module adds: Random Forest genomic-expression
+  classifiers (reused for both breast-cancer risk and leukemia subtyping
+  via two separately fitted instances), Evo 2 genomic-variant specialists
+  (imported from Module 5), a LightGBM blood-count (CBC) classifier for
+  leukemia, and histopathology MIL models (current-tier UNI2-h + CLAM-
+  style gated attention, with legacy attention-MIL as fallback).
 - **`condition_router.py`** does the actual routing: given a condition
   name and case data, it looks the condition up, runs every specialist it
   maps to, and attaches every reasoning method it calls for.
@@ -84,15 +85,9 @@ itself. The RF models stay registered specifically because the project's
 own instructions call for keeping them as the fallback for small
 cohorts/expression-panel-only hospital deployments.
 
-One explicit, documented gap this introduces: `fusion.py`'s
+One explicit gap that was fixed after this pass: `fusion.py`'s
 `SEVERITY_WEIGHTS` and `knowledge_graph_reasoner.py`'s `ONTOLOGY_LOOKUP`
-weren't touched this pass (per the project's instruction to leave both
-alone), so `genomic_variant` findings currently fuse at the neutral 0.5
-weight and get a "no ontology entry yet" stub `Explanation` rather than a
-real one — visible directly in `demo.py`'s output. This mirrors exactly
-the gap `docs/module8-code-review-notes.md` already documents fixing for
-`genomic`/`histopathology`/`cbc` when Module 6 first added them; the fix
-is the same kind of follow-up, just not done in this pass.
+now include `genomic_variant` entries (see `docs/module8-code-review-notes.md`).
 
 Everything else about how this module works — the auto-switch table, the
 condition-router logic, all three explainer implementations — is

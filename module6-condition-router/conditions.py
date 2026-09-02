@@ -33,10 +33,7 @@ CONDITION_REGISTRY: dict[str, ConditionSpec] = {
               "variant-call data) for BRCA1/2 variant-effect prediction + the Random "
               "Forest genomic_breast_cancer model (kept registered as the fallback for "
               "small cohorts / expression-panel-only data, per docs/model-algorithm-"
-              "catalog.md Section 5) — see docs/model-algorithm-catalog.md Section 12. "
-              "knowledge_graph has no ONTOLOGY_LOOKUP entries yet for genomic_variant "
-              "labels — see that finding's Explanation.is_stub in the report until "
-              "someone extends knowledge_graph_reasoner.py.",
+              "catalog.md Section 5) — see docs/model-algorithm-catalog.md Section 12.",
     ),
     "leukemia": ConditionSpec(
         canonical_name="leukemia",

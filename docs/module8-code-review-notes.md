@@ -116,3 +116,31 @@ FL labels. Spot-checking confirms these are accurately described — e.g.
   the catch further wasn't asked for and changing exception-handling scope
   without a clinician/owner's sign-off on the tradeoff felt out of scope
   for this pass.
+
+## Fixed: `genomic_variant` missing from fusion + ontology tables
+
+After the Evo 2 / `genomic_variant` track landed in Module 5/6, the same
+gap repeated: `fusion.py`'s `SEVERITY_WEIGHTS` and
+`knowledge_graph_reasoner.py`'s `ONTOLOGY_LOOKUP` had entries for
+`genomic` (expression panel) but not for `genomic_variant` (variant-call
+sequence data). Breast-cancer and leukemia demos that included Evo 2
+findings fused those at the neutral 0.5 weight and returned stub ontology
+explanations.
+
+**Fix applied:** added placeholder entries for all three Evo 2 labels
+(`likely_pathogenic`, `uncertain_significance`, `likely_benign`) in both
+tables — same spirit as the Module 6 modality fix above, still needing
+clinical review before production use.
+
+## Remaining gaps (documented, not yet implemented)
+
+- **Module 8 → Module 4 wiring** — `module8-synthesis/` runs standalone
+  via `demo.py`; the React dashboard does not yet render a
+  `SynthesisReport` (planned week-14 follow-up).
+- **Module 8 persistence** — no DB table yet for storing a synthesis
+  report with clinician sign-off/override (Module 7 is the natural home).
+- **Week 14 frontend items still open** — CSV vitals upload, SHAP/Grad-CAM
+  chart rendering in the dashboard UI.
+- **`FusionLayer` unknown-pair warning** — still worth adding a log/warn
+  when a genuinely new `(modality, label)` pair hits the 0.5 fallback, so
+  future specialists don't silently repeat this gap pattern.
