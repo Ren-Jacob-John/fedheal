@@ -2,7 +2,7 @@
   "name": "fedheal-federation-map",
   "private": true,
   "version": "0.1.0",
-  "description": "Spatial, real-time UI for FedHeal — a federation map of hospitals orbiting the shared model, replacing the plain-HTML module4-dashboard with a React app wired to Module 1 (auth) and Module 7 (admin/platform).",
+  "description": "Spatial, real-time UI for FedHeal — a federation map of hospitals orbiting the shared model, wired to Module 1 (auth) and Module 7 (admin/platform).",
   "type": "module",
   "scripts": {
     "dev": "vite",
