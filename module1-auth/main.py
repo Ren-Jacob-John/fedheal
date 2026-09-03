@@ -23,10 +23,12 @@ from sqlalchemy.orm import Session
 import auth
 import models
 from database import engine, get_db, Base
+from docs_theme import mount_custom_docs
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="FedHeal Auth Service", version="0.1.0")
+app = FastAPI(title="FedHeal Auth Service", version="0.1.0", docs_url=None)
+mount_custom_docs(app, accent="#5b7cfa", accent_soft="#dfe7ff")  # blue — Module 1
 
 # Dev-only: wide open CORS so Module 4 (dashboard) can call this freely while
 # everything runs on localhost. Lock this down to real origins before deploy.

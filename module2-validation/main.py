@@ -26,8 +26,10 @@ from pydantic import BaseModel, ValidationError
 from anomaly import flag_outliers
 from rules import check_forbidden_fields, check_plausible_ranges, check_cross_field_consistency
 from schema import VitalsRecord
+from docs_theme import mount_custom_docs
 
-app = FastAPI(title="FedHeal Data Validation Service", version="0.1.0")
+app = FastAPI(title="FedHeal Data Validation Service", version="0.1.0", docs_url=None)
+mount_custom_docs(app, accent="#1f9d63", accent_soft="#dcf5e8")  # green — Module 2
 
 # Module 7 (Admin/Platform) integration — best-effort only. If the admin
 # service isn't running, validation still works exactly as before; we just

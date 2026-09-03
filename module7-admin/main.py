@@ -47,10 +47,12 @@ import models
 import schemas
 from auth import oauth2_scheme, require_service_key, require_super_admin
 from database import Base, engine, get_db
+from docs_theme import mount_custom_docs
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="FedHeal Admin/Platform Service", version="0.1.0")
+app = FastAPI(title="FedHeal Admin/Platform Service", version="0.1.0", docs_url=None)
+mount_custom_docs(app, accent="#7c3fc9", accent_soft="#efe3fc")  # purple — Module 7
 
 app.add_middleware(
     CORSMiddleware,
