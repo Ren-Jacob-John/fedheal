@@ -618,6 +618,69 @@
   font-family: var(--font-mono);
   font-size: 15px;
 }
+.upload__tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: var(--space-3);
+}
+.upload__tab {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.upload__tab--active {
+  border-color: var(--teal);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+}
+.upload__file {
+  width: 100%;
+  font-size: 12px;
+  margin-bottom: var(--space-2);
+}
+.upload__hint--small {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  margin-top: -4px;
+}
+
+/* ---- flagged-record review ---- */
+
+.flagged-review {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.flagged-review__item {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  background: rgba(255, 176, 32, 0.05);
+}
+.flagged-review__vitals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin-bottom: var(--space-2);
+}
+.flagged-review__actions {
+  display: flex;
+  gap: 8px;
+}
+.flagged-review__actions .btn {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 12px;
+}
 
 /* ================= system map ================= */
 

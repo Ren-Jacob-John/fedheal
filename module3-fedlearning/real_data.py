@@ -34,7 +34,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 
 AUTH_API_URL = os.environ.get("FEDHEAL_AUTH_API_URL", "http://localhost:8001")
-SERVICE_KEY = os.environ.get("FEDMED_SERVICE_KEY", "dev-only-internal-service-key")
+SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M1", "dev-only-key-module3-to-module1")
 
 FEATURE_KEYS = [
     "age_years", "systolic_bp", "diastolic_bp", "heart_rate_bpm",

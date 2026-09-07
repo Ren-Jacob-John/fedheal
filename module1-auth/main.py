@@ -8,12 +8,15 @@ This is the foundation module: every other service (validation, training,
 dashboard) should treat "which hospital does this request belong to" as
 answered by this service's JWT, never by a client-supplied field.
 """
+import io
 import os
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, Request, Response, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -30,16 +33,61 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="FedHeal Auth Service", version="0.1.0", docs_url=None)
 mount_custom_docs(app, accent="#5b7cfa", accent_soft="#dfe7ff")  # blue — Module 1
 
-# Dev-only: wide open CORS so Module 4 (dashboard) can call this freely while
-# everything runs on localhost. Lock this down to real origins before deploy.
+# Locked to the real dashboard origin(s) via env var — comma-separated for
+# multiple environments (e.g. local dev + a deployed preview URL). Falls
+# back to the Vite dev server's default port so local dev keeps working
+# out of the box, but this is no longer "*": a malicious page in someone's
+# browser can no longer make authenticated requests here just because a
+# logged-in user happened to visit it.
+_dashboard_origins = os.environ.get("FEDHEAL_DASHBOARD_ORIGIN", "http://localhost:5173")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in _dashboard_origins.split(",") if o.strip()],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+# ---------- Rate limiting on /token ----------
+# Simple in-memory sliding-window limiter, keyed by client IP + attempted
+# username, so a slow drip of guesses against ONE account doesn't get
+# lumped in with normal traffic from a shared IP (e.g. an office NAT).
+# In-memory is fine for a single-process dev/demo deployment; a real
+# multi-worker deployment needs this backed by Redis or similar so limits
+# are shared across processes instead of reset per worker.
+_LOGIN_ATTEMPT_WINDOW_SECONDS = 60
+_LOGIN_ATTEMPT_MAX = 5
+_login_attempts: dict[str, deque] = defaultdict(deque)
+
+
+def _check_login_rate_limit(key: str) -> None:
+    now = time.monotonic()
+    attempts = _login_attempts[key]
+    while attempts and now - attempts[0] > _LOGIN_ATTEMPT_WINDOW_SECONDS:
+        attempts.popleft()
+    if len(attempts) >= _LOGIN_ATTEMPT_MAX:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many login attempts — try again in under {_LOGIN_ATTEMPT_WINDOW_SECONDS} seconds.",
+        )
+    attempts.append(now)
+
+# auto_error=False so a request with no Authorization header doesn't 401
+# before get_current_user gets a chance to check the httpOnly cookie
+# instead — the browser dashboard now relies on the cookie, curl/API
+# clients following this module's README still use the Bearer header.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
+
+# The dashboard used to keep the raw JWT in localStorage, readable by any
+# JS running on the page (including an XSS payload, if one ever got in).
+# Login now ALSO sets it as an httpOnly cookie the browser sends
+# automatically and JS can never read; the JSON body still returns
+# access_token too, for curl/API use exactly as this module's README
+# documents — no need to break that flow. COOKIE_SECURE defaults off for
+# local http dev; set FEDHEAL_COOKIE_SECURE=true once this is served over
+# https.
+TOKEN_COOKIE_NAME = "fedheal_token"
+COOKIE_SECURE = os.environ.get("FEDHEAL_COOKIE_SECURE", "false").lower() == "true"
 
 # Module 2 (validation) — every vitals upload gets forwarded here before
 # anything is stored. Module 1 never re-implements the validation rules.
@@ -111,6 +159,7 @@ class VitalsUploadResponse(BaseModel):
 
 
 class StoredVitalsOut(BaseModel):
+    id: str
     patient_ref: str
     age_years: float
     height_cm: float
@@ -129,12 +178,21 @@ class StoredVitalsOut(BaseModel):
 
 # ---------- Auth dependency ----------
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.User:
+def get_current_user(
+    request: Request,
+    token: str | None = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> models.User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    # Prefer an explicit Bearer header (curl/API clients); fall back to the
+    # httpOnly cookie the browser dashboard now sends automatically.
+    token = token or request.cookies.get(TOKEN_COOKIE_NAME)
+    if token is None:
+        raise credentials_exception
     payload = auth.decode_access_token(token)
     if payload is None:
         raise credentials_exception
@@ -215,7 +273,15 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
 
 
 @app.post("/token", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(
+    request: Request,
+    response: Response,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    client_ip = request.client.host if request.client else "unknown"
+    _check_login_rate_limit(f"{client_ip}:{form_data.username}")
+
     user = db.query(models.User).filter(models.User.email == form_data.username).first()
     if not user or not auth.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
@@ -223,7 +289,22 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     token = auth.create_access_token(
         data={"sub": user.id, "hospital_id": user.hospital_id, "role": user.role.value}
     )
+    response.set_cookie(
+        key=TOKEN_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        max_age=auth.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
     return Token(access_token=token)
+
+
+@app.post("/logout")
+def logout(response: Response):
+    response.delete_cookie(TOKEN_COOKIE_NAME, path="/")
+    return {"status": "logged_out"}
 
 
 @app.get("/me", response_model=UserOut)
@@ -294,6 +375,139 @@ async def upload_vitals(
     )
 
 
+# ---------- Vitals upload, CSV variant ----------
+# Same job as /vitals/upload, but for a hospital's CSV export instead of
+# hand-built JSON — forwards the raw file to Module 2's CSV endpoint, then
+# stores exactly the same way the JSON path does. Kept as a thin wrapper
+# rather than duplicating the storage loop.
+
+@app.post("/vitals/upload/csv", response_model=VitalsUploadResponse)
+async def upload_vitals_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if not current_user.hospital_id:
+        raise HTTPException(status_code=400, detail="Only hospital-scoped users can upload vitals")
+
+    raw_bytes = await file.read()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{VALIDATION_API_URL}/validate/vitals/csv",
+                files={"file": (file.filename, raw_bytes, "text/csv")},
+                data={"hospital_id": current_user.hospital_id},
+            )
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach Module 2 (validation service): {e}")
+
+    validation = resp.json()
+
+    # Re-parse the same CSV here (cheap, and keeps this endpoint from having
+    # to trust a second copy of "what the raw records were" over the wire)
+    # so we can store passed/flagged rows the same way the JSON path does.
+    import csv as _csv
+    reader = _csv.DictReader(io.StringIO(raw_bytes.decode("utf-8")))
+    raw_rows = list(reader)
+
+    stored = 0
+    for raw, result in zip(raw_rows, validation["results"]):
+        if result["status"] not in ("passed", "flagged"):
+            continue
+
+        def _num(v, cast):
+            if v in (None, ""):
+                return None
+            return cast(v)
+
+        record = models.VitalsRecord(
+            hospital_id=current_user.hospital_id,
+            patient_ref=result["patient_ref"] or raw.get("patient_ref", ""),
+            age_years=_num(raw.get("age_years"), float),
+            height_cm=_num(raw.get("height_cm"), float),
+            weight_kg=_num(raw.get("weight_kg"), float),
+            systolic_bp=_num(raw.get("systolic_bp"), float),
+            diastolic_bp=_num(raw.get("diastolic_bp"), float),
+            heart_rate_bpm=_num(raw.get("heart_rate_bpm"), float),
+            medication_count=int(_num(raw.get("medication_count"), float) or 0),
+            medication_mg_total=_num(raw.get("medication_mg_total"), float) or 0,
+            label=_num(raw.get("label"), int),
+            validation_status=result["status"],
+        )
+        db.add(record)
+        stored += 1
+    db.commit()
+
+    return VitalsUploadResponse(
+        total=validation["total"],
+        passed=validation["passed"],
+        flagged=validation["flagged"],
+        rejected=validation["rejected"],
+        stored=stored,
+        results=validation["results"],
+    )
+
+
+# ---------- Flagged-record review (human-in-the-loop) ----------
+# Closes the gap both this module's and Module 2's READMEs called out:
+# flagged records were stored but never surfaced for a human to actually
+# look at. A hospital_admin/clinician can list their own hospital's
+# flagged records and approve (-> "passed", eligible for training) or
+# reject (-> deleted, same as if Module 2 had rejected it outright)
+# each one. Scoped by JWT hospital_id like every other endpoint here —
+# never trusts a client-supplied hospital_id.
+
+class ReviewDecision(BaseModel):
+    decision: str  # "approve" | "reject"
+
+
+@app.get("/vitals/flagged", response_model=list[StoredVitalsOut])
+def list_flagged_vitals(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if not current_user.hospital_id:
+        raise HTTPException(status_code=400, detail="Only hospital-scoped users can review vitals")
+    return (
+        db.query(models.VitalsRecord)
+        .filter(
+            models.VitalsRecord.hospital_id == current_user.hospital_id,
+            models.VitalsRecord.validation_status == "flagged",
+        )
+        .all()
+    )
+
+
+@app.post("/vitals/{record_id}/review")
+def review_flagged_vitals(
+    record_id: str,
+    payload: ReviewDecision,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(
+        require_role(models.Role.HOSPITAL_ADMIN, models.Role.SUPER_ADMIN)
+    ),
+):
+    record = db.query(models.VitalsRecord).filter(models.VitalsRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    if current_user.role != models.Role.SUPER_ADMIN and record.hospital_id != current_user.hospital_id:
+        raise HTTPException(status_code=403, detail="Not permitted for this hospital's records")
+    if record.validation_status != "flagged":
+        raise HTTPException(status_code=400, detail="Only flagged records can be reviewed")
+
+    if payload.decision == "approve":
+        record.validation_status = "passed"
+        db.commit()
+        return {"id": record_id, "validation_status": "passed"}
+    elif payload.decision == "reject":
+        db.delete(record)
+        db.commit()
+        return {"id": record_id, "deleted": True}
+    else:
+        raise HTTPException(status_code=400, detail="decision must be 'approve' or 'reject'")
+
+
 # ---------- Vitals export (Module 3 wiring) ----------
 # Service-to-service only (not a human JWT) — this is what
 # module3-fedlearning/real_data.py calls to pull a hospital's validated
@@ -305,7 +519,7 @@ def export_vitals(
     hospital_id: str,
     include_flagged: bool = False,
     db: Session = Depends(get_db),
-    _=Depends(auth.require_service_key),
+    _=Depends(auth.require_module3_service_key),
 ):
     query = db.query(models.VitalsRecord).filter(models.VitalsRecord.hospital_id == hospital_id)
     if not include_flagged:

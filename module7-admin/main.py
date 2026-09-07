@@ -45,7 +45,7 @@ from sqlalchemy.orm import Session
 import hospitals_client
 import models
 import schemas
-from auth import oauth2_scheme, require_service_key, require_super_admin
+from auth import oauth2_scheme, require_module2_service_key, require_module3_service_key, require_super_admin
 from database import Base, engine, get_db
 from docs_theme import mount_custom_docs
 
@@ -54,9 +54,11 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="FedHeal Admin/Platform Service", version="0.1.0", docs_url=None)
 mount_custom_docs(app, accent="#7c3fc9", accent_soft="#efe3fc")  # purple — Module 7
 
+_dashboard_origins = os.environ.get("FEDHEAL_DASHBOARD_ORIGIN", "http://localhost:5173")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in _dashboard_origins.split(",") if o.strip()],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -102,7 +104,7 @@ async def set_hospital_status(
 def report_round(
     payload: schemas.TrainingRoundIn,
     db: Session = Depends(get_db),
-    _=Depends(require_service_key),
+    _=Depends(require_module3_service_key),
 ):
     record = models.TrainingRound(**payload.model_dump())
     db.add(record)
@@ -156,7 +158,7 @@ def trigger_round(_=Depends(require_super_admin)):
 def report_flag(
     payload: schemas.ValidationFlagIn,
     db: Session = Depends(get_db),
-    _=Depends(require_service_key),
+    _=Depends(require_module2_service_key),
 ):
     record = models.ValidationFlag(**payload.model_dump())
     db.add(record)

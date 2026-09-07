@@ -14,8 +14,8 @@ Prerequisites (this is real integration, not a standalone demo):
   3. At least 2 hospitals registered in Module 1, each with >= MIN_RECORDS
      validated vitals uploaded (via the dashboard's upload form, or curl
      against POST /vitals/upload — see module1-auth/README.md)
-  4. Same FEDMED_SERVICE_KEY exported here as Module 1 uses, so
-     GET /vitals/export authenticates.
+  4. Same FEDHEAL_SVC_KEY_M3_M1 exported here as Module 1's
+     FEDHEAL_SVC_KEY_M3_M1, so GET /vitals/export authenticates.
 
 If fewer than 2 hospitals have enough data yet, this exits with instructions
 rather than silently falling back to synthetic data — pretending real
@@ -36,7 +36,7 @@ MIN_RECORDS = 10
 N_ROUNDS = 8
 
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
-ADMIN_SERVICE_KEY = os.environ.get("FEDMED_SERVICE_KEY", "dev-only-internal-service-key")
+ADMIN_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M7", "dev-only-key-module3-to-module7")
 
 
 def report_round_to_admin(round_number: int, n_hospitals: int,
@@ -91,7 +91,7 @@ def main():
         print(
             f"\nOnly {len(partitions)} hospital(s) have >= {MIN_RECORDS} validated vitals "
             "records right now — need at least 2 for a meaningful federated round.\n"
-            "Upload more vitals via the dashboard (module4-dashboard) for a couple of "
+            "Upload more vitals via the dashboard (module4-dashboard-react) for a couple of "
             "hospitals, then re-run this script. (simulate.py's synthetic version still "
             "works standalone in the meantime.)"
         )

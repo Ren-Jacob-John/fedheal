@@ -39,7 +39,7 @@ N_ROUNDS = 8
 # admin service is up. We're only ever sending round number / hospital
 # count / accuracy numbers here, never any training data.
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
-ADMIN_SERVICE_KEY = os.environ.get("FEDMED_SERVICE_KEY", "dev-only-internal-service-key")
+ADMIN_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M7", "dev-only-key-module3-to-module7")
 
 
 def report_round_to_admin(round_number: int, n_hospitals: int,

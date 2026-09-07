@@ -18,12 +18,17 @@ export class ApiError extends Error {
   }
 }
 
-async function request(base, path, { method = "GET", token, body, form } = {}) {
+async function request(base, path, { method = "GET", token, body, form, file } = {}) {
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
 
   let payload;
-  if (form) {
+  if (file) {
+    // multipart/form-data — deliberately no Content-Type here, so the
+    // browser sets the boundary itself. Setting it manually is the classic
+    // way to silently break a multipart upload.
+    payload = file;
+  } else if (form) {
     headers["Content-Type"] = "application/x-www-form-urlencoded";
     payload = form;
   } else if (body !== undefined) {
@@ -33,7 +38,16 @@ async function request(base, path, { method = "GET", token, body, form } = {}) {
 
   let resp;
   try {
-    resp = await fetch(`${base}${path}`, { method, headers, body: payload });
+    resp = await fetch(`${base}${path}`, {
+      method,
+      headers,
+      body: payload,
+      // Sends the httpOnly session cookie Module 1 sets on login — this is
+      // now the primary auth path for the browser dashboard (see App.jsx).
+      // The Authorization header above still works too, for any caller
+      // that explicitly passes a token (curl, tests, etc.).
+      credentials: "include",
+    });
   } catch (networkErr) {
     throw new ApiError(
       `Couldn't reach ${base}. Is the service running? (${networkErr.message})`,
@@ -73,6 +87,12 @@ export const authApi = {
     return request(AUTH_API_BASE, "/me", { token });
   },
 
+  // Clears the httpOnly session cookie server-side. No token needed — the
+  // cookie itself is what authenticates this request.
+  logout() {
+    return request(AUTH_API_BASE, "/logout", { method: "POST" });
+  },
+
   // Public directory — no token required. Only name/id/is_active per
   // hospital, which is exactly what the map needs to place a node for
   // every hospital in the federation without leaking anything about
@@ -92,6 +112,29 @@ export const authApi = {
       method: "POST",
       token,
       body: { records },
+    });
+  },
+
+  // CSV variant — a hospital's own EHR/spreadsheet export, not hand-typed
+  // JSON. `csvFile` is a browser File object from an <input type="file">.
+  uploadVitalsCsv(token, csvFile) {
+    const form = new FormData();
+    form.append("file", csvFile);
+    return request(AUTH_API_BASE, "/vitals/upload/csv", { method: "POST", token, file: form });
+  },
+
+  // This hospital's own records currently sitting in "flagged" (soft
+  // outlier) status, waiting for a human to approve or reject them —
+  // see review() below.
+  flaggedVitals(token) {
+    return request(AUTH_API_BASE, "/vitals/flagged", { token });
+  },
+
+  reviewFlaggedVitals(token, recordId, decision) {
+    return request(AUTH_API_BASE, `/vitals/${recordId}/review`, {
+      method: "POST",
+      token,
+      body: { decision },
     });
   },
 };

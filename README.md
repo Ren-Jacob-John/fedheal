@@ -370,7 +370,8 @@ npm run dev          # http://localhost:5173
 # Module 7 — Admin/Platform service (start Module 1 first — it proxies to it)
 cd module7-admin && pip install -r requirements.txt --break-system-packages
 export FEDMED_JWT_SECRET=dev-only-change-me   # MUST match Module 1's
-export FEDMED_SERVICE_KEY=dev-only-internal-service-key
+export FEDHEAL_SVC_KEY_M2_M7=dev-only-key-module2-to-module7   # MUST match Module 2's
+export FEDHEAL_SVC_KEY_M3_M7=dev-only-key-module3-to-module7   # MUST match Module 3's
 uvicorn main:app --reload --port 8005
 ```
 

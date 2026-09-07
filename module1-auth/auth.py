@@ -16,16 +16,19 @@ SECRET_KEY = os.environ.get("FEDMED_JWT_SECRET", "dev-only-change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-# Same shared-secret pattern Module 7 uses for its service-to-service
-# endpoints (see module7-admin/auth.py's docstring for the reasoning) —
-# this is what gates Module 3's real-data loader reading a hospital's
-# stored vitals via GET /vitals/export. Not a substitute for real
-# service auth (mTLS / per-service keys) before this touches real data.
-SERVICE_KEY = os.environ.get("FEDMED_SERVICE_KEY", "dev-only-internal-service-key")
+# Per-caller service keys, not one secret shared across every internal
+# caller. Previously every service (Module 2, Module 3, Module 7) read
+# and sent the SAME FEDMED_SERVICE_KEY, which meant compromising any one
+# of them handed over the key to every service-to-service endpoint in the
+# platform. The only real caller of Module 1's /vitals/export is Module
+# 3's real_data.py, so it gets its own key — still a placeholder for real
+# service auth (mTLS / a secrets manager) before this touches real data,
+# but no longer a single point of compromise across unrelated services.
+MODULE3_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M1", "dev-only-key-module3-to-module1")
 
 
-def require_service_key(x_service_key: str | None = Header(default=None)) -> None:
-    if x_service_key != SERVICE_KEY:
+def require_module3_service_key(x_service_key: str | None = Header(default=None)) -> None:
+    if x_service_key != MODULE3_SERVICE_KEY:
         raise HTTPException(status_code=401, detail="Missing or invalid service key")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

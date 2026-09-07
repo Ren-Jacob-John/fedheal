@@ -21,3 +21,12 @@ class VitalsRecord(BaseModel):
     heart_rate_bpm: Optional[float] = None
     medication_count: int = Field(0, ge=0)
     medication_mg_total: float = Field(0, ge=0)  # combined daily dose, mg
+
+    # Real diagnosis/outcome label (0 = no adverse outcome, 1 = adverse
+    # outcome), supplied by the hospital's own clinical records — NOT
+    # upload-time guesswork. Optional because not every hospital has one
+    # wired up yet; Module 3's real_data.py documents exactly how it
+    # handles records that arrive without one. Validated here (0/1 only)
+    # so a malformed label fails the batch the same way a malformed vital
+    # would, instead of silently reaching training.
+    label: Optional[int] = Field(None, ge=0, le=1)

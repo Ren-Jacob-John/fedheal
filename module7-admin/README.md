@@ -50,7 +50,9 @@ summaries** (Module 2 computes flags per-batch but never kept a log).
   issues its own.
 - **Another service posting data** (`POST /admin/rounds`,
   `POST /admin/flags`) isn't a logged-in person, so it uses the
-  `X-Service-Key` header instead, matching `FEDMED_SERVICE_KEY`.
+  `X-Service-Key` header instead — Module 2 and Module 3 each have their
+  OWN key (`FEDHEAL_SVC_KEY_M2_M7` / `FEDHEAL_SVC_KEY_M3_M7`) rather than
+  one secret shared across every internal caller.
 
 ## Running it
 
@@ -60,7 +62,8 @@ pip install -r requirements.txt --break-system-packages
 
 # MUST match the secret Module 1 was started with, or tokens won't verify here.
 export FEDMED_JWT_SECRET=dev-only-change-me
-export FEDMED_SERVICE_KEY=dev-only-internal-service-key
+export FEDHEAL_SVC_KEY_M2_M7=dev-only-key-module2-to-module7   # must match Module 2's
+export FEDHEAL_SVC_KEY_M3_M7=dev-only-key-module3-to-module7   # must match Module 3's
 
 uvicorn main:app --reload --port 8005
 ```
@@ -103,7 +106,8 @@ both unset to fall back to local SQLite.
 |---|---|---|
 | `FEDHEAL_DATABASE_URL` / `FEDHEAL_ADMIN_DATABASE_URL` | local SQLite | Supabase/Postgres connection string — see "Using Supabase" above |
 | `FEDMED_JWT_SECRET` | `dev-only-change-me` | Must match Module 1's — this service only verifies tokens, never issues them. |
-| `FEDMED_SERVICE_KEY` | `dev-only-internal-service-key` | Shared secret Module 2/3 use to post rounds/flags here. |
+| `FEDHEAL_SVC_KEY_M2_M7` | `dev-only-key-module2-to-module7` | Module 2's own key for posting validation-flag summaries here. |
+| `FEDHEAL_SVC_KEY_M3_M7` | `dev-only-key-module3-to-module7` | Module 3's own key for posting completed rounds here. |
 | `FEDMED_AUTH_API_URL` | `http://localhost:8001` | Where Module 1 is reachable, for the hospital proxy calls. |
 
 ## Not done yet (next sprint)

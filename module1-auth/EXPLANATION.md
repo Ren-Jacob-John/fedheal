@@ -63,11 +63,14 @@ can't forge a JWT it doesn't have.**
 
 Real: password hashing, JWT issuance/verification, hospital-scoped data
 isolation, the vitals upload→validate→store pipeline, DB-backed training
-status, and — as of this sprint — a real Supabase/Postgres backend
-(`FEDHEAL_DATABASE_URL` in `.env`, falling back to local SQLite if unset).
-Prototype-level, documented in this folder's `README.md` "Next sprint"
-section: no Alembic migrations yet (schema changes mean a fresh table
-today, not a safe upgrade of existing data), no rate limiting on login
-attempts, wide-open CORS (fine for local dev, not for a real deployment),
-and no real diagnosis/outcome label on uploaded vitals yet — see
-`module3-fedlearning/real_data.py` for how that gap is handled downstream.
+status, a real Supabase/Postgres backend (`FEDHEAL_DATABASE_URL` in
+`.env`, falling back to local SQLite if unset) — and, as of this sprint,
+rate limiting on `/token`, CORS locked to `FEDHEAL_DASHBOARD_ORIGIN`
+instead of `"*"`, an httpOnly session cookie alongside the bearer token,
+per-service credentials for each internal caller instead of one shared
+key, and real diagnosis/outcome labels (validated, not just passed
+through) on uploaded vitals. Prototype-level, still documented in this
+folder's `README.md` "Next sprint" section: no Alembic migrations yet
+(schema changes mean a fresh table today, not a safe upgrade of existing
+data) — see `module3-fedlearning/real_data.py` for how hospitals without
+real labels yet are handled downstream.

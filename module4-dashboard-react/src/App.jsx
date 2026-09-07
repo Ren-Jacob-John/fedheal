@@ -7,15 +7,20 @@ import RoundsRail from "./components/RoundsRail.jsx";
 import DetailDrawer from "./components/DetailDrawer.jsx";
 import SystemMap from "./components/SystemMap.jsx";
 
-const TOKEN_KEY = "fedheal_token";
 const POLL_MS = 12000;
 
 export default function App() {
-  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
+  // No longer persisted in localStorage — a JWT sitting there is readable
+  // by any JS on the page (including an XSS payload). This is now just
+  // in-memory state for the current tab; session PERSISTENCE across
+  // reloads comes from the httpOnly cookie Module 1 sets on login, which
+  // the bootstrap effect below checks via /me regardless of what's held
+  // in memory.
+  const [token, setToken] = useState(null);
   const [me, setMe] = useState(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState(null);
-  const [bootstrapping, setBootstrapping] = useState(Boolean(token));
+  const [bootstrapping, setBootstrapping] = useState(true);
 
   const [hospitals, setHospitals] = useState([]);
   const [trainingStatus, setTrainingStatus] = useState(null);
@@ -56,21 +61,19 @@ export default function App() {
     }
   }, []);
 
-  // Restore a session on first load.
+  // Restore a session on first load — always attempted (not gated on
+  // having an in-memory token), since the real signal is the httpOnly
+  // cookie, which we can't read from JS to check beforehand.
   useEffect(() => {
-    if (!token) return;
     let cancelled = false;
     (async () => {
       try {
-        const meRes = await authApi.me(token);
+        const meRes = await authApi.me();
         if (cancelled) return;
         setMe(meRes);
-        await loadAll(token, meRes.role, { silent: true });
+        await loadAll(null, meRes.role, { silent: true });
       } catch {
-        if (!cancelled) {
-          localStorage.removeItem(TOKEN_KEY);
-          setToken(null);
-        }
+        if (!cancelled) setMe(null);
       } finally {
         if (!cancelled) setBootstrapping(false);
       }
@@ -83,7 +86,7 @@ export default function App() {
 
   // Background polling while a session is active.
   useEffect(() => {
-    if (!token || !me) return;
+    if (!me) return;
     const id = setInterval(() => loadAll(token, me.role, { silent: true }), POLL_MS);
     return () => clearInterval(id);
   }, [token, me, loadAll]);
@@ -103,7 +106,9 @@ export default function App() {
     setAuthError(null);
     try {
       const tok = await authApi.login(email, password);
-      localStorage.setItem(TOKEN_KEY, tok);
+      // Kept in memory only (not localStorage) — the httpOnly cookie
+      // Module 1 just set is what actually persists the session; this is
+      // just so the current tab can pass a Bearer header if it wants to.
       setToken(tok);
       const meRes = await authApi.me(tok);
       setMe(meRes);
@@ -116,7 +121,7 @@ export default function App() {
   }
 
   function handleLogout() {
-    localStorage.removeItem(TOKEN_KEY);
+    authApi.logout().catch(() => {}); // clear the server-side cookie; state reset below regardless
     setToken(null);
     setMe(null);
     setHospitals([]);
@@ -172,13 +177,8 @@ export default function App() {
     }
   }
 
-  if (!token || bootstrapping) {
-    if (bootstrapping) {
-      return <div className="app-boot mono">reconnecting to the federation…</div>;
-    }
-    return (
-      <LoginGate onLogin={handleLogin} authApiBase={authApi.base} busy={authBusy} error={authError} />
-    );
+  if (bootstrapping) {
+    return <div className="app-boot mono">reconnecting to the federation…</div>;
   }
 
   if (!me) {

@@ -15,12 +15,15 @@ Only records that pass 1-4 are eligible to reach Module 3's local training —
 flagged-but-passing records (step 5) go to the hospital dashboard for human
 review rather than silently being dropped or silently being trained on.
 """
+import io
+import math
 import os
 from collections import Counter
-from typing import Literal
+from typing import Literal, Optional
 
 import httpx
-from fastapi import FastAPI
+import pandas as pd
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel, ValidationError
 
 from anomaly import flag_outliers
@@ -37,7 +40,7 @@ mount_custom_docs(app, accent="#1f9d63", accent_soft="#dcf5e8")  # green — Mod
 # reason string, never a raw record, matching the "operator can see flags,
 # never patient data" design.
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
-ADMIN_SERVICE_KEY = os.environ.get("FEDMED_SERVICE_KEY", "dev-only-internal-service-key")
+ADMIN_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M2_M7", "dev-only-key-module2-to-module7")
 
 
 def report_flags_to_admin(hospital_id: str | None, results: list["ValidationResult"]) -> None:
@@ -83,9 +86,13 @@ class BatchValidationResponse(BaseModel):
     results: list[ValidationResult]
 
 
-@app.post("/validate/vitals", response_model=BatchValidationResponse)
-def validate_vitals_batch(payload: BatchValidationRequest):
-    raw_records = payload.records
+def _validate_records(raw_records: list[dict], hospital_id: str | None) -> BatchValidationResponse:
+    """
+    The actual five-stage gate, shared by both the JSON endpoint and the
+    CSV endpoint below — one implementation, two ways in, so CSV uploads
+    get exactly the same checks JSON uploads always have, not a
+    second-class parallel path.
+    """
     results: list[ValidationResult] = []
     clean_indexed: dict[int, dict] = {}  # index -> record dict, for outlier pass
 
@@ -139,11 +146,51 @@ def validate_vitals_batch(payload: BatchValidationRequest):
     flagged = sum(1 for r in results if r.status == "flagged")
     rejected = sum(1 for r in results if r.status == "rejected")
 
-    report_flags_to_admin(payload.hospital_id, results)
+    report_flags_to_admin(hospital_id, results)
 
     return BatchValidationResponse(
         total=len(results), passed=passed, flagged=flagged, rejected=rejected, results=results
     )
+
+
+@app.post("/validate/vitals", response_model=BatchValidationResponse)
+def validate_vitals_batch(payload: BatchValidationRequest):
+    return _validate_records(payload.records, payload.hospital_id)
+
+
+# CSV upload — most hospitals will export from their own EHR/spreadsheet
+# systems as CSV, not hand-write JSON. Same five-stage gate as
+# /validate/vitals; the only difference is the wire format going in.
+# Expected columns match schema.VitalsRecord's field names exactly
+# (patient_ref, age_years, height_cm, weight_kg, systolic_bp, diastolic_bp,
+# heart_rate_bpm, medication_count, medication_mg_total, label). Missing
+# optional columns are fine; missing required columns fail that row the
+# same way a missing JSON field would.
+@app.post("/validate/vitals/csv", response_model=BatchValidationResponse)
+async def validate_vitals_csv(
+    file: UploadFile = File(...),
+    hospital_id: Optional[str] = Form(None),
+):
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Expected a .csv file")
+
+    raw_bytes = await file.read()
+    try:
+        df = pd.read_csv(io.BytesIO(raw_bytes))
+    except Exception as e:  # pandas raises several different error types here
+        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {e}")
+
+    # NaN -> None so pydantic sees a missing optional field, not a float
+    # NaN. df.where(df.notnull(), None) looks like it should do this but
+    # doesn't for numeric columns — assigning None back into a float64
+    # column just re-coerces to NaN. Doing it per-value after to_dict()
+    # sidesteps the dtype coercion entirely.
+    records = df.to_dict(orient="records")
+    records = [
+        {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in rec.items()}
+        for rec in records
+    ]
+    return _validate_records(records, hospital_id)
 
 
 @app.get("/health")

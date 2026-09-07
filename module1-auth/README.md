@@ -117,10 +117,13 @@ table names. See `module7-admin/.env.example`.
   tables on first run but has no story for evolving a schema that already
   has data in it (e.g. adding a column to `vitals_records` later) —
   fine for a fresh Supabase project today, not once real data exists.
-- Rate limiting / lockout on `/token`.
-- Add a real diagnosis/outcome field to the vitals upload flow — right now
-  `label` is optional and Module 3 falls back to a rule-based placeholder
-  when it's missing (see `module3-fedlearning/real_data.py`'s docstring).
-  This is the actual gap standing between "the pipeline runs end-to-end"
-  and "the model output means anything clinically."
-- Lock down CORS `allow_origins` to the real dashboard origin.
+
+Done as of this sprint (kept here briefly for anyone comparing against
+an older checkout): rate limiting on `/token`; a validated `label` field
+on uploaded vitals (`GET /vitals/flagged` + `POST /vitals/{id}/review`
+now let a hospital admin act on the ones Module 2 flags as statistical
+outliers); CORS locked to `FEDHEAL_DASHBOARD_ORIGIN`; an httpOnly session
+cookie alongside the bearer token; and per-service credentials
+(`FEDHEAL_SVC_KEY_M3_M1`) replacing the old shared `FEDMED_SERVICE_KEY`.
+`label` is still optional — Module 3's `real_data.py` documents exactly
+how it handles hospitals that don't have one wired up yet.

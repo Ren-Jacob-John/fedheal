@@ -144,3 +144,29 @@ clinical review before production use.
 - **`FusionLayer` unknown-pair warning** — still worth adding a log/warn
   when a genuinely new `(modality, label)` pair hits the 0.5 fallback, so
   future specialists don't silently repeat this gap pattern.
+
+## Update (Sep 2026 sprint) — some of the above is now fixed
+
+Revisiting this doc while working the Oct 20 plan: two items in "Dev-only
+items already flagged in-repo" and one in "Week 14 frontend items still
+open" are done, not just planned. Leaving the original notes above as the
+historical record of what was found, but for anyone reading top-to-bottom:
+
+- CORS is no longer `allow_origins=["*"]` in Module 1 or Module 7 — both
+  now read from `FEDHEAL_DASHBOARD_ORIGIN`.
+- The shared `X-Service-Key`/`FEDMED_SERVICE_KEY` is gone — replaced with
+  a distinct key per caller (`FEDHEAL_SVC_KEY_M3_M1`, `FEDHEAL_SVC_KEY_M2_M7`,
+  `FEDHEAL_SVC_KEY_M3_M7`).
+- CSV vitals upload (listed under "Week 14 frontend items still open") is
+  done: `POST /validate/vitals/csv` (Module 2) and `POST
+  /vitals/upload/csv` (Module 1), with a matching tab in the dashboard's
+  upload panel.
+- Also added since the original review, not previously tracked here:
+  `/token` rate limiting, an httpOnly session cookie replacing
+  `localStorage` token storage, and a real validated `label` field with a
+  human-review flow for flagged records (`GET /vitals/flagged` +
+  `POST /vitals/{id}/review`).
+
+Still genuinely open: SHAP/Grad-CAM chart rendering in the dashboard,
+Module 8 → Module 4 wiring, Module 8 persistence, the `FusionLayer`
+unknown-pair warning, and Alembic migrations.

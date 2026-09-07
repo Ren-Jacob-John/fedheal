@@ -1,4 +1,5 @@
 import UploadPanel from "./UploadPanel.jsx";
+import FlaggedReview from "./FlaggedReview.jsx";
 
 function FlagsList({ flags }) {
   if (!flags) return <p className="drawer__muted">Loading flags…</p>;
@@ -161,6 +162,13 @@ export default function DetailDrawer({
             <>
               <p className="eyebrow drawer__section-label">Upload vitals</p>
               <UploadPanel token={token} onUploaded={onUploaded} />
+            </>
+          )}
+
+          {isOwnHospital && (me.role === "hospital_admin" || isSuperAdmin) && (
+            <>
+              <p className="eyebrow drawer__section-label">Flagged records awaiting review</p>
+              <FlaggedReview token={token} onReviewed={onUploaded} />
             </>
           )}
         </>
