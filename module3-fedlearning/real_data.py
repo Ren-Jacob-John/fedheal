@@ -78,6 +78,52 @@ def fetch_hospital_vitals(hospital_id: str, include_flagged: bool = False) -> li
     return resp.json()
 
 
+def resolve_hospital_id(hospital_name: str) -> str:
+    """
+    Convenience for client_runner.py's --hospital-name flag: hospitals are
+    keyed by DB id (a UUID) everywhere real, but an operator starting a
+    client by hand shouldn't have to go paste that id out of a database —
+    look it up by the hospital's display name instead.
+    """
+    resp = httpx.get(f"{AUTH_API_URL}/hospitals", timeout=10.0)
+    resp.raise_for_status()
+    matches = [h for h in resp.json() if h["name"] == hospital_name]
+    if not matches:
+        raise ValueError(f"No hospital named {hospital_name!r} found at {AUTH_API_URL}/hospitals")
+    return matches[0]["id"]
+
+
+def load_single_hospital_partition(
+    hospital_id: str, min_records: int = 10, include_flagged: bool = False
+):
+    """
+    Same per-record -> (X, y) conversion as load_real_partitions() below, but
+    scoped to exactly one hospital and meant to be called FROM that
+    hospital's own client_runner.py process — unlike load_real_partitions(),
+    which pulls every active hospital's data into one place (fine for
+    simulate_real.py's in-process stand-in, wrong for a real client, which
+    should only ever touch its own hospital's data).
+
+    Raises ValueError (not silently returning empty arrays) if this hospital
+    doesn't have enough validated data yet, so client_runner.py fails loudly
+    instead of "federating" on nothing.
+    """
+    records = fetch_hospital_vitals(hospital_id, include_flagged=include_flagged)
+    if len(records) < min_records:
+        raise ValueError(
+            f"hospital {hospital_id} has only {len(records)} validated vitals "
+            f"records (need >= {min_records}). Upload more via the dashboard "
+            "before running client_runner.py for this hospital."
+        )
+
+    X = np.stack([_record_to_features(r) for r in records])
+    y = np.array([
+        r["label"] if r.get("label") is not None else _placeholder_label(r)
+        for r in records
+    ])
+    return X, y
+
+
 def load_real_partitions(min_records_per_hospital: int = 10):
     """
     Returns (hospital_names, partitions) for every active hospital that has
