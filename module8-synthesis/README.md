@@ -48,11 +48,14 @@ decision, not an oversight:
   which wraps a Module 6 `ConditionReport` (optionally plus a Module 5
   `FusedAssessment`) into the reviewable structure above, and a
   `to_markdown()` renderer for the dashboard/CLI.
-- `demo.py` — runs `build_synthesis()` against the same synthetic cases
-  Module 6's `demo.py` uses (breast cancer, leukemia, diabetic
-  retinopathy, heart disease, plus a partial-data and an unknown-condition
-  case), so the aggregation logic is exercised end to end without any
-  real patient data.
+- `demo.py` — runs `build_synthesis()` against synthetic cases drawn from
+  Module 6's condition registry (breast cancer with full data + fusion,
+  leukaemia with full data + fusion, breast cancer again with one
+  specialist's data deliberately omitted, and heart disease), plus an
+  unknown-condition case, so the aggregation logic — including the
+  partial-data `data_completeness` path and the "unknown condition never
+  produces a report" path — is exercised end to end without any real
+  patient data.
 
 ## Next sprint
 

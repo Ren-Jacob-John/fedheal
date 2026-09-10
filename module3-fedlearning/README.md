@@ -17,7 +17,8 @@ python simulate.py
 | `client.py` | `HospitalClient` — a Flower `NumPyClient`. This is the exact class a real hospital's local app would run. |
 | `simulate.py` | Manually drives federated rounds in one process over **synthetic** data (no Ray needed) so it runs anywhere with no extra setup. |
 | `simulate_real.py` | **New this sprint.** Same FedAvg loop as `simulate.py`, but over **real** hospital data via `real_data.py` — requires Module 1 + Module 2 running and at least 2 hospitals with validated vitals uploaded. |
-| `server.py` | Reference for a REAL networked Flower server — next sprint's work, not used by either `simulate*.py`. |
+| `server.py` | A real, networked Flower `FedAvg` server (`fl.server.start_server`, port 8080) — not used by either `simulate*.py`, which drive everything in one process instead. |
+| `client_runner.py` | A real, networked Flower client for one hospital (`fl.client.start_client`) — pulls that hospital's own validated vitals via `real_data.py` and connects to `server.py`. Run one per hospital; see "Running the real networked version" below. |
 
 ## Why `simulate.py` doesn't use Flower's built-in simulation runner
 
@@ -57,14 +58,37 @@ stress-test FedAvg under more extreme skew; expect federated accuracy to
 suffer in that regime — that's a real, documented FedAvg limitation worth
 understanding, not a bug to chase away.
 
+## Running the real networked version (`server.py` + `client_runner.py`)
+
+Once at least 2 hospitals each have `--min-records` (default 10) validated
+vitals uploaded (via the dashboard, or `POST /vitals/upload` — see
+`module1-auth/README.md`):
+
+```bash
+# terminal 1 — the aggregation server (plaintext gRPC, localhost:8080)
+python server.py
+
+# terminal 2+ — one process per hospital, pointed at that server
+python client_runner.py --hospital-name "General Hospital" --server localhost:8080
+python client_runner.py --hospital-id <uuid> --server localhost:8080
+```
+
+`client_runner.py` reuses the exact same `HospitalClient` class the
+in-process simulations use, loading that one hospital's own data via
+`real_data.py` and never touching any other hospital's records. `--secure`
+switches to TLS, but `server.py` doesn't terminate TLS yet, so this is a
+localhost/LAN demo, not something to point at real traffic over the open
+internet.
+
 ## Next sprint (not yet done here, on purpose)
 
 - Swap `SGDClassifier` for XGBoost or a small PyTorch net (see the
   proposal's model-zoo discussion) — only `model.py` and `client.py`'s
   fit/evaluate need to change.
-- Stand up `server.py` for real, and write a `client_runner.py` that a
-  "hospital" machine actually runs (`fl.client.start_numpy_client`),
-  swapping the in-process loop in `simulate_real.py` for real gRPC traffic.
+- TLS for `server.py`/`client_runner.py` — both currently talk plaintext
+  gRPC (`--insecure` defaults to `True`), which is fine for a
+  localhost/LAN demo and not for real hospital traffic over the open
+  internet.
 - Real diagnosis/outcome labels. `real_data.py` currently falls back to a
   rule-based placeholder label for any vitals record uploaded without one —
   see its docstring. That's fine for proving the pipeline runs end-to-end,

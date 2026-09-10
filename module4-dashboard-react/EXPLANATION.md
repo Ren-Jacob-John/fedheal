@@ -22,9 +22,12 @@ Built with **React + Vite** as a client-only SPA:
   trigger-round, hospital activate/deactivate). No server-side rendering;
   every gate is enforced by the APIs first, and the UI simply doesn't
   render data it was never going to receive.
-- **`App.jsx`** — session state (JWT in `localStorage`), polling for live
-  federation status, view switching between the orbital map and the static
-  architecture diagram, and super_admin-only admin data loading.
+- **`App.jsx`** — session state (the JWT itself lives only in memory for
+  the current tab, not `localStorage`; session persistence across reloads
+  comes from the httpOnly cookie Module 1 sets on login, checked via
+  `/me` on bootstrap), polling for live federation status, view switching
+  between the orbital map and the static architecture diagram, and
+  super_admin-only admin data loading.
 - **`FederationMap.jsx`** — the core spatial visualization: hospitals in
   orbit, distance reflecting validated-record count, color reflecting
   training readiness, animated weight beams during active rounds.
@@ -32,7 +35,11 @@ Built with **React + Vite** as a client-only SPA:
   crosses each boundary (JWT, validated records, weights-only, synthesis
   report).
 - **`DetailDrawer.jsx` / `UploadPanel.jsx`** — per-hospital detail and
-  vitals upload form, scoped to the logged-in user's hospital.
+  vitals upload form (JSON or CSV file), scoped to the logged-in user's
+  hospital.
+- **`FlaggedReview.jsx`** — lists that hospital's flagged (statistical
+  outlier) vitals records and lets a hospital admin approve or reject
+  each one.
 - **`RoundsRail.jsx` / `TopHUD.jsx`** — federated-round timeline and
   operator overview stats for `super_admin`.
 
@@ -60,13 +67,13 @@ The UI never invents access the API doesn't grant.
 
 ## What's real vs. what's a known prototype simplification
 
-Real: login, federation map, vitals upload, training-status display,
-super_admin operator views (overview, rounds rail, trigger-round with
-honest async polling), hospital activate/deactivate, architecture diagram
-with all eight modules.
+Real: login (with an httpOnly session cookie, not `localStorage`),
+federation map, vitals upload (JSON or CSV), flagged-vitals human review
+(approve/reject), training-status display, super_admin operator views
+(overview, rounds rail, trigger-round with honest async polling),
+hospital activate/deactivate, architecture diagram with all eight modules.
 
 Documented as next-sprint work in this folder's `README.md` and
-`docs/16-week-development-plan.md` week 14: CSV upload (JSON paste only
-today), SHAP/Grad-CAM chart rendering from Module 6 explainer output,
-Module 8 synthesis report rendering, and httpOnly-cookie token storage
-instead of `localStorage` (week 13 security hardening).
+`docs/16-week-development-plan.md` week 14: SHAP/Grad-CAM chart rendering
+from Module 6 explainer output, and Module 8 synthesis report rendering
+— both still shown as "planned" edges in `SystemMap.jsx`.

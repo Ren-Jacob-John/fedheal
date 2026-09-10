@@ -41,7 +41,7 @@ Needs Module 1 (`:8001`) and, for the super-admin view, Module 7
 (`:8005`) already running — see the repo root README.
 
 ```bash
-cd module4-dashboard
+cd module4-dashboard-react
 npm install
 cp .env.example .env.local   # only needed if you changed the default ports
 npm run dev                  # http://localhost:5173
@@ -84,8 +84,9 @@ src/
     FederationMap.jsx      the orbital map (SVG)
     RoundsRail.jsx          bottom timeline of federated rounds
     DetailDrawer.jsx        right-hand panel for the selected node
-    UploadPanel.jsx          vitals upload form (used inside the drawer)
-    SystemMap.jsx           static architecture view of all 7 modules
+    UploadPanel.jsx          vitals upload form, JSON or CSV (used inside the drawer)
+    FlaggedReview.jsx        list a hospital's flagged vitals + approve/reject them
+    SystemMap.jsx           static architecture view of all 8 modules
   styles/
     tokens.css              design tokens (color, type, spacing)
     global.css               resets + shared motion/utility classes

@@ -72,13 +72,19 @@ patients no single hospital ever saw, so that's the fair test.
 ## What's real vs. what's a known prototype simplification
 
 Real: the FedAvg math itself, the non-IID simulation, the real-data
-pipeline via `real_data.py`/`simulate_real.py`. Documented as next-sprint
-work in this folder's `README.md`: `server.py` is a *reference*
-implementation of a real networked Flower server (not yet wired up — both
-`simulate*.py` scripts drive everything in one process); the model
-architecture is still logistic regression, not the XGBoost/PyTorch models
-the proposal calls for; and — the most important open gap — uploaded
-vitals don't carry a real diagnosis/outcome label yet, so `real_data.py`
-falls back to a rule-based placeholder label when one's missing. Any
-accuracy number `simulate_real.py` reports right now demonstrates the
-*pipeline* works, not clinical performance.
+pipeline via `real_data.py`/`simulate_real.py`, and — as of this sprint —
+a real, networked path: `server.py` runs an actual Flower `FedAvg` server
+and `client_runner.py` is a real per-hospital client that connects to it,
+loading only that hospital's own validated vitals. `simulate.py` and
+`simulate_real.py` still drive everything in a single process (no Ray,
+no real network) for a zero-setup demo; `server.py`/`client_runner.py`
+are the networked alternative once you want hospitals as separate
+processes/machines. Documented as next-sprint work in this folder's
+`README.md`: the model architecture is still logistic regression, not
+the XGBoost/PyTorch models the proposal calls for; `server.py`/
+`client_runner.py` communicate over plaintext gRPC, not TLS; and — the
+most important open gap — uploaded vitals don't carry a real
+diagnosis/outcome label yet, so `real_data.py` falls back to a rule-based
+placeholder label when one's missing. Any accuracy number
+`simulate_real.py` (or a real `client_runner.py` round) reports right now
+demonstrates the *pipeline* works, not clinical performance.

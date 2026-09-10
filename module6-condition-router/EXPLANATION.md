@@ -98,10 +98,15 @@ documents for adding any new condition or specialist.
 
 ## How other modules depend on it
 
-Nothing else in the current build calls into this module yet — it's the
-layer a future clinician-facing "search by disease" UI would call. It
-depends on Module 5 for the underlying specialist implementations and
-registry pattern.
+- **Module 8** (synthesis) imports this module's `condition_router`
+  directly and aggregates its `ConditionReport` output (raw specialist
+  predictions + explanations) into a clinician-facing review packet —
+  this module never talks to Module 8, Module 8 pulls from it.
+- It depends on Module 5 for the underlying specialist implementations
+  and registry pattern.
+- No UI calls into it yet — it's still the layer a future
+  clinician-facing "search by disease" screen would call directly, in
+  addition to Module 8's synthesis path.
 
 ## What's real vs. what's a known prototype simplification
 

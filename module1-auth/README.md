@@ -37,7 +37,7 @@ curl -X POST localhost:8001/vitals/upload -H "Authorization: Bearer <jwt>" \
 
 # 6. (Module 3 only) export a hospital's stored, validated vitals
 curl "localhost:8001/vitals/export?hospital_id=<hospital_id>" \
-  -H "X-Service-Key: dev-only-internal-service-key"
+  -H "X-Service-Key: dev-only-key-module3-to-module1"
 ```
 
 ## API contract (for Module 4 / dashboard team)
@@ -48,10 +48,14 @@ curl "localhost:8001/vitals/export?hospital_id=<hospital_id>" \
 | `/hospitals` | GET | no | List tenants |
 | `/hospitals/{id}` | PATCH | super_admin JWT | Activate/deactivate a hospital (used by Module 7's operator view) |
 | `/register` | POST | no | Create a user under a hospital |
-| `/token` | POST | no | Login, get JWT (OAuth2 password form: `username`, `password`) |
+| `/token` | POST | no | Login (OAuth2 password form: `username`, `password`); returns the JWT in the body AND sets it as an httpOnly `fedheal_token` cookie |
+| `/logout` | POST | no | Clear the `fedheal_token` cookie |
 | `/me` | GET | yes | Get current user's profile |
-| `/vitals/upload` | POST | yes | Forward `{records: [...]}` to Module 2 for validation; store passed/flagged records under the caller's hospital |
-| `/vitals/export` | GET | service key | Module 3-only: pull a hospital's stored validated vitals (`?hospital_id=&include_flagged=`) |
+| `/vitals/upload` | POST | yes | Forward `{records: [...]}` (JSON) to Module 2 for validation; store passed/flagged records under the caller's hospital |
+| `/vitals/upload/csv` | POST | yes | Same as above, but for a CSV file upload (`multipart/form-data`, field `file`) |
+| `/vitals/flagged` | GET | yes | List the caller's hospital's flagged (soft-outlier) vitals records awaiting review |
+| `/vitals/{record_id}/review` | POST | hospital_admin/super_admin JWT | `{"decision": "approve"}` (-> `passed`) or `{"decision": "reject"}` (-> deleted) on a flagged record |
+| `/vitals/export` | GET | service key (`X-Service-Key`) | Module 3-only: pull a hospital's stored validated vitals (`?hospital_id=&include_flagged=`) |
 | `/training-status` | GET | yes | Real, DB-backed: validated record count + readiness per hospital (super-admin sees all) |
 
 The JWT payload contains `sub` (user id), `hospital_id`, and `role` — decode

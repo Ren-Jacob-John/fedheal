@@ -71,15 +71,18 @@ separate:
 ## What's real vs. what's a known prototype simplification
 
 Real: the hospital proxy, the training-round and validation-flag logging,
-the trigger-round endpoint, the two-tier auth model. Documented in this
-folder's `README.md`: service-to-service auth is a single shared secret
-today, not per-service credentials or mTLS — fine for "only our own
-services can write this table" at prototype stage, not what you'd ship
-against real hospital data; the "trigger round" endpoint knows a training
+the trigger-round endpoint, the two-tier auth model, and per-caller
+service credentials — Module 2 and Module 3 each authenticate with their
+own key (`FEDHEAL_SVC_KEY_M2_M7` / `FEDHEAL_SVC_KEY_M3_M7`) rather than
+one secret shared across every internal caller. Still a placeholder for
+real service auth (mTLS, or keys issued by an internal secrets manager) —
+fine for "only our own services can write this table" at prototype
+stage, not what you'd ship against real hospital data. Documented in this
+folder's `README.md`: the "trigger round" endpoint knows a training
 process *launched* but not whether it actually *succeeded* (a real job
 queue like Celery/RQ would fix this properly, matching Module 3's own
 planned graduation path); the super_admin slice of Module 4's React
 dashboard already consumes this API (overview, rounds, flags, trigger-
 round, hospital status) — what's still missing is Module 8 synthesis
-rendering, explainer charts, and CSV upload (see week 14 in
+rendering and explainer charts (see week 14 in
 `docs/16-week-development-plan.md`).

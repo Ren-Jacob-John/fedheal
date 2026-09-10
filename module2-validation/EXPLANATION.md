@@ -62,7 +62,11 @@ each, plus a per-record breakdown.
 ## What's real vs. what's a known prototype simplification
 
 Real: all five checks, the full pipeline, the reporting-to-Module-7
-integration. Documented as next-sprint work in this folder's `README.md`:
-a CSV upload endpoint (right now it's JSON only), and giving a human
-review workflow to `flagged` records in the dashboard rather than just
-surfacing the count.
+integration, a CSV upload endpoint (`POST /validate/vitals/csv`, sharing
+the exact same `_validate_records` gate as the JSON path) alongside the
+original JSON one, and a human review workflow for `flagged` records —
+Module 1's `GET /vitals/flagged` + `POST /vitals/{id}/review` let a
+hospital admin approve or reject each one, rather than this module's
+count just sitting unreviewed. Documented as next-sprint work in this
+folder's `README.md`: the same five-stage pipeline, adapted for imaging
+metadata once the imaging track starts.

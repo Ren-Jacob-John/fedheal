@@ -279,7 +279,7 @@ fusion, and additional explainability/reasoning methods).
   building Module 8, including fusion-severity-table gaps found and fixed
   in `module5-modelzoo/fusion.py` (Module 6 modalities and `genomic_variant`).
 - **`moduleN-*/EXPLANATION.md`** (modules 1–8) — a full, presentation-ready
-  presentation-ready explanation of what that module does, how it works,
+  explanation of what that module does, how it works,
   and how it connects to the rest of the system. (`moduleN-*/README.md`
   stays the terse, dev-facing "how to run this" reference — the two are
   meant to be read together, not as duplicates.)

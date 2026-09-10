@@ -20,9 +20,11 @@ a standalone verdict.
   - `requires_clinician_review = True` is **hardcoded**, not configurable.
   - `to_markdown()` renders a human-readable review packet for CLI or
     future dashboard display.
-- **`demo.py`** exercises the same synthetic cases as Module 6's demo
-  (breast cancer, leukemia, diabetic retinopathy, heart disease, plus
-  partial-data and unknown-condition cases) without real patient data.
+- **`demo.py`** exercises synthetic cases (breast cancer and leukaemia,
+  each with full data and fusion; breast cancer again with one
+  specialist's data deliberately withheld to prove `data_completeness`
+  surfaces the gap; heart disease; and an unknown condition to prove no
+  report gets generated) without real patient data.
 
 ## What this deliberately is NOT
 
