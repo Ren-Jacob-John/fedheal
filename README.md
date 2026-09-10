@@ -358,14 +358,27 @@ uvicorn main:app --reload --port 8001
 cd module2-validation && pip install -r requirements.txt --break-system-packages
 uvicorn main:app --reload --port 8002
 
-# Module 3 — Federated learning simulation
+# Module 3 — Federated learning
 cd module3-fedlearning && pip install -r requirements.txt --break-system-packages
 python simulate.py          # synthetic data, no dependencies on other modules
 python simulate_real.py     # real hospital data — needs Module 1 + Module 2 running first
 
+# Module 3 (optional) — real networked FL instead of the in-process simulations above
+python server.py                                                     # terminal A
+python client_runner.py --hospital-name "General Hospital" --server localhost:8080   # terminal B
+python client_runner.py --hospital-id <uuid> --server localhost:8080                 # terminal C, etc.
+
 # Module 4 — Dashboard, React "Federation Map" (see module4-dashboard-react/README.md)
 cd module4-dashboard-react && npm install
 npm run dev          # http://localhost:5173
+
+# Module 5 — Model zoo & task router (no server; run the demo)
+cd module5-modelzoo && pip install -r requirements.txt --break-system-packages
+python demo.py
+
+# Module 6 — Condition router (no server; run the demo)
+cd module6-condition-router && pip install -r requirements.txt --break-system-packages
+python demo.py
 
 # Module 7 — Admin/Platform service (start Module 1 first — it proxies to it)
 cd module7-admin && pip install -r requirements.txt --break-system-packages
@@ -373,7 +386,20 @@ export FEDMED_JWT_SECRET=dev-only-change-me   # MUST match Module 1's
 export FEDHEAL_SVC_KEY_M2_M7=dev-only-key-module2-to-module7   # MUST match Module 2's
 export FEDHEAL_SVC_KEY_M3_M7=dev-only-key-module3-to-module7   # MUST match Module 3's
 uvicorn main:app --reload --port 8005
+
+# Module 8 — Synthesis / review-packet layer (no server; run the demo)
+# Uses Module 5 + Module 6's own dependencies via sys.path — install those first
+# (see the module5/module6 commands above), then:
+cd module8-synthesis && python demo.py
 ```
+
+Modules 5, 6, and 8 are libraries exercised through their own `demo.py`,
+not long-running services — there's nothing to `uvicorn`/`npm run dev` for
+them. Module 3's `server.py`/`client_runner.py` are an alternative to
+`simulate_real.py`: same FedAvg logic, but hospitals as separate processes
+talking real gRPC instead of one in-process loop — see
+`module3-fedlearning/README.md` for prerequisites (each hospital needs its
+own validated vitals uploaded first).
 
 ## Creating a hospital login
 
