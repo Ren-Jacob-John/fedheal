@@ -37,6 +37,7 @@ import argparse
 import sys
 
 import httpx
+import numpy as np
 from sklearn.model_selection import train_test_split
 
 import flwr as fl
@@ -118,11 +119,21 @@ def main() -> None:
         print(f"Could not load this hospital's data: {e}")
         sys.exit(1)
 
+    # Stratifying needs every class to have >= 2 members (one can go to
+    # train, one to test) — "more than one distinct class" isn't enough,
+    # as the smoke test surfaced: a hospital can easily have exactly one
+    # positive-class record among --min-records, which sklearn rejects.
+    # Falling back to a plain (non-stratified) split there is the honest
+    # move — it's what would happen anyway once a class is too rare to
+    # stratify meaningfully.
+    classes, counts = np.unique(y, return_counts=True)
+    stratify = y if len(classes) > 1 and counts.min() >= 2 else None
+
     X_train, X_test, y_train, y_test = train_test_split(
         X, y,
         test_size=args.test_size,
         random_state=42,
-        stratify=y if len(set(y)) > 1 else None,
+        stratify=stratify,
     )
     print(
         f"  {len(X_train)} train / {len(X_test)} local-test records, "

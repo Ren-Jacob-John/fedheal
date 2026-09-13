@@ -42,6 +42,32 @@ FEATURE_KEYS = [
 ]
 N_FEATURES = len(FEATURE_KEYS)
 
+# Fixed normalization constants — deliberately NOT fit from any hospital's
+# own data. Every hospital has to apply the EXACT same transform to the
+# EXACT same feature, or FedAvg silently breaks: it's averaging models
+# that were each trained in a different feature space. A per-hospital
+# StandardScaler wouldn't leak anything sensitive on its own, but it
+# would violate that assumption just as badly as skipping scaling
+# entirely — so these are fixed, clinically-plausible general-population
+# reference values agreed on in advance, not statistics computed from
+# this project's own demo data (which would silently drift as demo data
+# changes).
+#
+# Why this matters at all: verified directly while investigating why
+# test_client_runner_matches_simulation.py's real-vs-reproduction
+# comparison wasn't reproducible — these columns span roughly 0-5
+# (medication_count) to 0-400+ (medication_mg_total) UNSCALED, and
+# SGDClassifier's gradient step scales with raw feature magnitude. A
+# single partial_fit() epoch on unscaled data sent coef_ from 0 to the
+# thousands; see docs/development-plan-to-oct20.md's "next sprint"
+# section for the full trace. That's not an FL-networking bug — it
+# reproduces identically in simulate_real.py, which never touches the
+# network — but it does mean every real-data FL path was numerically
+# unstable (wildly different round-to-round accuracy, hypersensitive to
+# floating-point summation order) until this fix.
+_FEATURE_MEAN = np.array([50.0, 120.0, 80.0, 75.0, 75.0, 170.0, 2.0, 150.0])
+_FEATURE_STD = np.array([20.0, 20.0, 10.0, 12.0, 18.0, 12.0, 2.0, 120.0])
+
 
 def _placeholder_label(record: dict) -> int:
     """
@@ -56,7 +82,8 @@ def _placeholder_label(record: dict) -> int:
 
 
 def _record_to_features(record: dict) -> np.ndarray:
-    return np.array([float(record.get(k) or 0.0) for k in FEATURE_KEYS])
+    raw = np.array([float(record.get(k) or 0.0) for k in FEATURE_KEYS])
+    return (raw - _FEATURE_MEAN) / _FEATURE_STD
 
 
 def list_active_hospitals() -> list[dict]:
@@ -170,7 +197,11 @@ def carve_global_holdout(partitions, test_size: float = 0.15, seed: int = 42):
         if len(X) < 4:  # too small to carve anything off safely
             remaining.append((X, y))
             continue
-        stratify = y if len(np.unique(y)) > 1 else None
+        # Same fix as client_runner.py/data.py: a class needs >= 2 members
+        # to stratify on, not just "more than one distinct class" — a real
+        # hospital partition can have exactly one record of a class.
+        classes, counts = np.unique(y, return_counts=True)
+        stratify = y if len(classes) > 1 and counts.min() >= 2 else None
         X_keep, X_hold, y_keep, y_hold = train_test_split(
             X, y, test_size=test_size, random_state=seed, stratify=stratify
         )

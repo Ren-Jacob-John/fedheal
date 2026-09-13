@@ -94,7 +94,17 @@ def partition_for_hospitals(X, y, n_hospitals: int, non_iid: bool = True, alpha:
 
 def train_test_split_per_hospital(partitions, test_size: float = 0.2, seed: int = 42):
     """Each hospital keeps its own local held-out test set — never shared."""
-    return [
-        train_test_split(X, y, test_size=test_size, random_state=seed, stratify=y if len(set(y)) > 1 else None)
-        for X, y in partitions
-    ]
+    results = []
+    for X, y in partitions:
+        # Stratifying needs every class to have >= 2 members, not just
+        # "more than one distinct class" — a real (small) hospital partition
+        # can easily have exactly one record of a class, which sklearn
+        # rejects outright. Falls back to a plain split in that case (see
+        # client_runner.py, which hit this for real and is the reference
+        # fix for this exact pattern).
+        classes, counts = np.unique(y, return_counts=True)
+        stratify = y if len(classes) > 1 and counts.min() >= 2 else None
+        results.append(
+            train_test_split(X, y, test_size=test_size, random_state=seed, stratify=stratify)
+        )
+    return results
