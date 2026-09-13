@@ -1,12 +1,6 @@
 # FedHeal — Federated Learning Healthcare AI
 
-Starter codebase for the first development milestone, split across a 4-person team
-following the build order from the project proposal:
-
-1. Auth + multi-tenancy (get hospital logins working)
-2. Data ingestion + validation (structured-data track)
-3. Local training (XGBoost/logistic regression) + Flower federated loop across simulated hospitals
-4. Dashboard wired to show login + training/round status
+Developed by a team of 4 members
 
 ## Abstract
 
@@ -177,7 +171,7 @@ The system follows this end-to-end flow:
    their password and issues a JWT carrying their hospital ID and role —
    every later step trusts *only* that token, never a client-supplied
    hospital ID.
-2. The hospital uploads a batch of vitals records. Module 1 forwards them
+2. The hospital uploads a batch of vitals, problems(diesease/condition) faced and medical history records. Module 1 forwards them
    to **Module 2**, which runs them through five checks in order
    (de-identification → schema → plausibility ranges → cross-field
    consistency → batch-level isolation-forest outlier detection) and
@@ -202,6 +196,179 @@ The system follows this end-to-end flow:
 6. **Module 7** ties it together for a platform operator: hospital
    status, round-by-round accuracy history, and rolled-up (never
    patient-level) data-quality flags, all in one view.
+
+## How to Run FedHeal
+
+FedHeal is eight independent services/libraries, not one app — some are
+long-running HTTP services, some are scripts you run once, and some are
+plain Python libraries other modules import. This section is the single
+place that ties the whole thing together and gets you from a fresh clone
+to a working, end-to-end demo.
+
+### Prerequisites
+
+- **Python 3.11+** (each backend module has its own `requirements.txt`;
+  a separate virtualenv per module, or one shared one, both work)
+- **Node.js 18+** and npm, for the dashboard
+- A **Postgres/Supabase** connection string for anything beyond local
+  dev, **or** just leave the database URL unset in each module and it
+  falls back to local SQLite — the fastest way to try the whole system
+  end-to-end
+- No GPU is required to run the core demo (auth, validation, federated
+  simulation, dashboard, tabular/vitals specialist). A GPU plus
+  `torch`/`transformers`/Hugging Face Hub access is only needed if you
+  want to exercise the imaging/genomic/foundation-model specialists in
+  `module5-modelzoo`/`module6-condition-router` beyond their stub
+  fallback — see those modules' own `README.md` for exactly what each
+  one needs.
+
+### 1. Configure environment variables
+
+Every backend module ships a `.env.example` — copy it to `.env` in that
+same folder and fill it in:
+
+```bash
+cp module1-auth/.env.example        module1-auth/.env
+cp module7-admin/.env.example       module7-admin/.env
+cp module4-dashboard-react/.env.example module4-dashboard-react/.env.local
+```
+
+Module 2 and Module 3 don't require a `.env` for local/demo use, only
+optional reporting URLs.
+
+A handful of values **must match exactly** across the modules that share
+them — this is the most common source of "why is this 401'ing" during
+first setup:
+
+| Variable | Must be identical in | Purpose |
+|---|---|---|
+| `FEDMED_JWT_SECRET` | Module 1, Module 7 | Module 7 only verifies tokens Module 1 issues |
+| `FEDHEAL_SVC_KEY_M3_M1` | Module 1, Module 3 (`real_data.py`) | lets Module 3 call Module 1's `/vitals/export` |
+| `FEDHEAL_SVC_KEY_M2_M7` | Module 2, Module 7 | lets Module 2 post rolled-up validation flags |
+| `FEDHEAL_SVC_KEY_M3_M7` | Module 3, Module 7 | lets Module 3 post round/accuracy history |
+| `FEDHEAL_DASHBOARD_ORIGIN` | Module 1, Module 7 | must equal the dashboard's real origin (default `http://localhost:5173`) so CORS allows it |
+
+For a first local run, the `.env.example` defaults already agree with
+each other — you only need to change values if you're deploying beyond
+one machine, or want Postgres instead of the SQLite fallback.
+
+### 2. Install dependencies
+
+```bash
+# each backend module:
+for m in module1-auth module2-validation module3-fedlearning module5-modelzoo module6-condition-router module7-admin; do
+  (cd $m && pip install -r requirements.txt)
+done
+
+# dashboard:
+cd module4-dashboard-react && npm install
+```
+
+(Use a virtualenv per module, or one shared one — nothing here requires
+isolation, it's just good practice given differing dependency pins.)
+
+### 3. Start the long-running services, in this order
+
+Each of these is its own terminal/process. Start them in this order so
+each service's dependencies are already up when it needs them:
+
+| # | Module | Command | Port | Why this order |
+|---|---|---|---|---|
+| 1 | Module 1 — Auth | `cd module1-auth && uvicorn main:app --reload --port 8001` | 8001 | Everything else trusts its tokens |
+| 2 | Module 2 — Validation | `cd module2-validation && uvicorn main:app --reload --port 8002` | 8002 | Module 1 forwards every upload here |
+| 3 | Module 7 — Admin | `cd module7-admin && uvicorn main:app --reload --port 8005` | 8005 | Proxies Module 1, receives reports from 2 & 3 |
+| 4 | Module 4 — Dashboard | `cd module4-dashboard-react && npm run dev` | 5173 | Needs 1 and 7 up to have anything to show |
+
+Modules 3, 5, 6, and 8 are **not** long-running servers — see step 4/5.
+
+Check everything is actually up before moving on:
+```bash
+curl http://localhost:8001/docs   # Module 1 Swagger UI
+curl http://localhost:8002/health
+curl http://localhost:8005/health
+```
+
+### 4. Seed some demo data (optional but recommended)
+
+```bash
+cd module7-admin && python seed_demo.py
+```
+
+This populates a few hospitals, some training-round history, and a mix
+of clean/flagged records, so the dashboard isn't empty on first login.
+
+### 5. Run a federated learning round
+
+Module 3 is script-driven, not a long-running server, for the current
+single-process simulation:
+
+```bash
+cd module3-fedlearning
+python simulate.py          # synthetic data, no other services required
+# or, against real uploaded/validated hospital data (needs Module 1 up
+# and FEDHEAL_SVC_KEY_M3_M1 configured):
+python simulate_real.py
+```
+
+Either script reports each round's progress to Module 7 (best-effort —
+runs fine standalone if Module 7 isn't up), and you can also trigger a
+round directly from the dashboard's super-admin view or via
+`POST /admin/rounds/trigger` on Module 7, which launches the same script
+as a subprocess.
+
+The **real networked** version (separate Flower server + one client
+process per hospital machine, instead of one local script) is
+`module3-fedlearning/server.py` + `client_runner.py` — see that module's
+own `README.md` before using this path; it's a reference implementation
+for a real multi-machine deployment, not part of the default local demo.
+
+### 6. Try the model zoo / condition router / synthesis layer
+
+These three (Modules 5, 6, 8) are plain Python libraries, imported
+directly rather than run as services — each has a runnable `demo.py`:
+
+```bash
+cd module5-modelzoo          && python demo.py
+cd ../module6-condition-router && python demo.py
+cd ../module8-synthesis        && python demo.py
+```
+
+Expect `[STUB]`-labeled output for the imaging/genomic specialists unless
+you've installed `torch`/`transformers`/etc. and have GPU + Hugging Face
+Hub access — see each module's `README.md` for exactly which
+dependencies unlock which specialist, and `docs/model-algorithm-catalog.md`
+/ `docs/foundation-models-status.md` for the full picture of what's real
+vs. stub-tier today.
+
+### 7. Log in to the dashboard
+
+Open `http://localhost:5173`. Use the credentials `seed_demo.py` created
+(check its output / source for the demo login), or register a hospital
+via `POST /register` on Module 1 first if you haven't seeded demo data.
+From there: upload vitals, review flagged records, trigger a training
+round, and watch the federation map / rounds rail update.
+
+### Shutting everything down
+
+Each service is a normal foreground process (`Ctrl+C` to stop). There's
+no shared process manager yet — see `DEVELOPMENT_PLAN.md` for the
+planned `docker-compose.yml` that will bring all of the above up/down
+with one command.
+
+### Troubleshooting
+
+- **401s between services** → check the shared-variable table in step 1
+  — a mismatched `FEDMED_JWT_SECRET` or service key is the most common
+  cause.
+- **CORS errors in the browser console** → `FEDHEAL_DASHBOARD_ORIGIN` on
+  Modules 1 and 7 must exactly match the URL the dashboard is actually
+  running at (including port).
+- **Module 3 can't reach Module 1's `/vitals/export`** → confirm Module 1
+  is up first and `FEDHEAL_SVC_KEY_M3_M1` matches in both `.env` files.
+- **Everything in Module 5/6 shows `[STUB]`** → expected without
+  `torch`/GPU/Hugging Face Hub access in your environment; this is the
+  registry's safe fallback behavior, not a bug. See those modules'
+  `README.md`.
 
 ## Algorithms & Frameworks Used
 
@@ -265,183 +432,3 @@ fusion, and additional explainability/reasoning methods).
   simulation, and replacing today's rule-based placeholder outcome labels
   with real clinical diagnosis/outcome labels once available — all
   without changing the surrounding architecture.
-
-## Documentation map
-
-- **`docs/16-week-development-plan.md`** — the full 16-week schedule this
-  project follows, from initial proposal through final demo. Weeks 1–9
-  cover the modules already in this repo; weeks 10–16 are the forward plan.
-- **`docs/foundation-models-status.md`** — status of the SOTA
-  foundation-model specialists added to Module 5 (RadFM, BiomedParse,
-  SegVol, OmiCLIP, MeDiM, plus two unresolved names) — what's real code
-  vs. blocked upstream vs. unverified.
-- **`docs/module8-code-review-notes.md`** — code review findings from
-  building Module 8, including fusion-severity-table gaps found and fixed
-  in `module5-modelzoo/fusion.py` (Module 6 modalities and `genomic_variant`).
-- **`moduleN-*/EXPLANATION.md`** (modules 1–8) — a full, presentation-ready
-  explanation of what that module does, how it works,
-  and how it connects to the rest of the system. (`moduleN-*/README.md`
-  stays the terse, dev-facing "how to run this" reference — the two are
-  meant to be read together, not as duplicates.)
-
-## Model / algorithm / framework catalog
-
-**Read `docs/model-algorithm-catalog.md` before building any new disease
-specialist.** It covers every model family, algorithm, and framework
-relevant to medical diagnosis + reasoning — imaging (2D classification,
-segmentation, whole-slide/histopathology), tabular/EHR, genomic/omics,
-clinical NLP, time-series, survival analysis, multi-modal fusion, and
-explainability/reasoning methods (Grad-CAM, SHAP, causal inference,
-knowledge graphs, etc.) — not just the five models currently implemented
-in `module5-modelzoo`. Disease-specific notes for breast cancer and
-leukemia are included, plus a general pattern for any disease not yet
-named. Every future stage should pick its model(s) from this document.
-
-## Team assignment
-
-| Person | Module | Folder | Status this sprint |
-|---|---|---|---|
-| **P1 — Backend/Auth** | Authentication & Multi-Tenancy | `module1-auth/` | ✅ Done & tested. Hospital register/login/JWT, hospital-scoped endpoints. |
-| **P2 — Data Engineer** | Data Ingestion & Validation | `module2-validation/` | ✅ Done & tested. Schema, range, consistency, and outlier checks. |
-| **P3 — ML Engineer** | Local Training + Federated Aggregation | `module3-fedlearning/` | ✅ Done & tested. Working FedAvg simulation, 3 hospitals, non-IID data. |
-| **P4 — Frontend** | Hospital Dashboard | `module4-dashboard-react/` | ✅ Done & tested. React "federation map," wired to Module 1 + Module 7's real APIs. The original plain-HTML dashboard was removed once this was confirmed fully wired — see the module's README. |
-| **P3 (cont.) — ML Engineer** | Model Zoo & Task Router | `module5-modelzoo/` | ✅ Done & tested. XGBoost + TabPFN v2 (both real) + legacy DenseNet201/ResNet50/EfficientNet/U-Net + current-tier BiomedCLIP (CNN+ViT-hybrid head)/nnU-Net upgrades (real code, both tiers stubbed in this sandbox, current-tier preferred automatically when available) + Evo 2 genomic-variant specialist (new) + RadFM/BiomedParse/SegVol/OmiCLIP (real loading code added, stubbed here — see `docs/foundation-models-status.md`) coexisting via one unchanged router + fusion layer. |
-| **P3 (cont.) — ML Engineer** | Condition Router (auto-switch by disease) | `module6-condition-router/` | ✅ Done & tested. Mention a disease (breast cancer, leukemia, diabetic retinopathy, etc.) and it auto-routes to the right specialist(s) + reasoning method(s) — see its README for the verified condition pathways. Histopathology now defaults to a UNI2-h + CLAM-style MIL specialist (legacy attention-MIL kept as fallback), and breast cancer/leukemia gained an Evo 2 genomic-variant track alongside the existing Random Forest expression-panel model. |
-| **P1 (cont.) — Backend/Auth** | Admin / Platform Module (the operator's view) | `module7-admin/` | ✅ Done & tested. Hospital oversight (proxies Module 1), training-round history, validation-flag summaries, and a working "trigger a round" endpoint. First real cross-module wiring — see its README for exactly what's real. |
-| — | Synthesis / Review-Packet Layer | `module8-synthesis/` | ✅ Done & tested. Aggregates Module 5/6 findings into a clinician review packet — no diagnosis, no treatment plan, `requires_clinician_review` hardcoded true. See its README. |
-
-> Week mapping for this build: Week 1 = Modules 1–4, Week 2 = Module 5,
-> Week 3 = Module 6, Week 4 = Module 7. This is the 8-module breakdown
-> from the original proposal, not a 16-stage syllabus — if your
-> course/team has a specific 16-stage breakdown, share it and this
-> numbering can be remapped to match.
-
-Every module runs and was smoke-tested independently. Modules 1–6 were
-**not wired to each other** on purpose in earlier sprints — Module 7
-brought the first real integration (dashboard status, training rounds,
-validation flags), and **this sprint wires the actual data flow**: Module 1
-now has a real `POST /vitals/upload` (forwards to Module 2 for validation,
-stores passed/flagged records per hospital) and `GET /vitals/export`
-(service-key gated, for Module 3), `training-status` is DB-backed instead
-of a fake dict, the dashboard has a real upload form, and
-`module3-fedlearning/simulate_real.py` runs FedAvg over that real,
-validated hospital data instead of synthetic partitions. The one honest
-gap left: uploaded vitals don't yet carry a real diagnosis/outcome label,
-so `real_data.py` falls back to a rule-based placeholder — see its
-docstring before treating any accuracy number from `simulate_real.py` as
-clinically meaningful.
-
-Each folder is independently runnable so the four of you aren't blocked on each other
-this sprint. Module 3's `simulate.py` still doesn't depend on Module 1/2 — it uses
-synthetic data so ML work can start immediately without a live pipeline; use
-`simulate_real.py` once you want to exercise the real, wired-up path.
-
-## Why this order
-
-- Module 3 (FedAvg loop) is the riskiest/most novel piece technically, so it starts now,
-  in isolation, on synthetic data — nobody wants to discover in week 4 that the
-  federated averaging logic doesn't work.
-- Module 1 and 2 can be built in parallel; neither depends on the other.
-- Module 4 just needs Module 1's API contract (see `module1-auth/README.md`) to start
-  wiring real requests instead of mocked ones.
-
-## Running things
-
-Each module has its own README with exact setup commands. Quick summary:
-
-```bash
-# Module 1 — Auth API
-cd module1-auth && pip install -r requirements.txt --break-system-packages
-uvicorn main:app --reload --port 8001
-
-# Module 2 — Validation service
-cd module2-validation && pip install -r requirements.txt --break-system-packages
-uvicorn main:app --reload --port 8002
-
-# Module 3 — Federated learning
-cd module3-fedlearning && pip install -r requirements.txt --break-system-packages
-python simulate.py          # synthetic data, no dependencies on other modules
-python simulate_real.py     # real hospital data — needs Module 1 + Module 2 running first
-
-# Module 3 (optional) — real networked FL instead of the in-process simulations above
-python server.py                                                     # terminal A
-python client_runner.py --hospital-name "General Hospital" --server localhost:8080   # terminal B
-python client_runner.py --hospital-id <uuid> --server localhost:8080                 # terminal C, etc.
-
-# Module 4 — Dashboard, React "Federation Map" (see module4-dashboard-react/README.md)
-cd module4-dashboard-react && npm install
-npm run dev          # http://localhost:5173
-
-# Module 5 — Model zoo & task router (no server; run the demo)
-cd module5-modelzoo && pip install -r requirements.txt --break-system-packages
-python demo.py
-
-# Module 6 — Condition router (no server; run the demo)
-cd module6-condition-router && pip install -r requirements.txt --break-system-packages
-python demo.py
-
-# Module 7 — Admin/Platform service (start Module 1 first — it proxies to it)
-cd module7-admin && pip install -r requirements.txt --break-system-packages
-export FEDMED_JWT_SECRET=dev-only-change-me   # MUST match Module 1's
-export FEDHEAL_SVC_KEY_M2_M7=dev-only-key-module2-to-module7   # MUST match Module 2's
-export FEDHEAL_SVC_KEY_M3_M7=dev-only-key-module3-to-module7   # MUST match Module 3's
-uvicorn main:app --reload --port 8005
-
-# Module 8 — Synthesis / review-packet layer (no server; run the demo)
-# Uses Module 5 + Module 6's own dependencies via sys.path — install those first
-# (see the module5/module6 commands above), then:
-cd module8-synthesis && python demo.py
-```
-
-Modules 5, 6, and 8 are libraries exercised through their own `demo.py`,
-not long-running services — there's nothing to `uvicorn`/`npm run dev` for
-them. Module 3's `server.py`/`client_runner.py` are an alternative to
-`simulate_real.py`: same FedAvg logic, but hospitals as separate processes
-talking real gRPC instead of one in-process loop — see
-`module3-fedlearning/README.md` for prerequisites (each hospital needs its
-own validated vitals uploaded first).
-
-## Creating a hospital login
-
-Every user in FedHeal belongs to a hospital (tenant) — there's no
-standalone "sign up" separate from that. With Module 1 running
-(`localhost:8001`), the full flow from zero to a logged-in session:
-
-```bash
-# 1. Create the hospital (tenant) itself
-curl -X POST localhost:8001/hospitals -H "Content-Type: application/json" \
-  -d '{"name": "General Hospital"}'
-# -> {"id": "<hospital_id>", "name": "General Hospital", "is_active": true}
-# copy <hospital_id> from the response for the next step
-
-# 2. Register a user under that hospital
-curl -X POST localhost:8001/register -H "Content-Type: application/json" \
-  -d '{"email": "doc@general.com", "password": "hunter2", "hospital_id": "<hospital_id>"}'
-# role defaults to "clinician" if not specified — see roles below
-
-# 3. Log in — /token takes an OAuth2 form body, not JSON
-curl -X POST localhost:8001/token -d "username=doc@general.com&password=hunter2"
-# -> {"access_token": "<jwt>", "token_type": "bearer"}
-
-# 4. Use the token on any protected endpoint
-curl localhost:8001/me -H "Authorization: Bearer <jwt>"
-```
-
-You can also do all four steps interactively at
-http://localhost:8001/docs once Module 1 is running.
-
-**Roles** (set at registration via `"role"` in step 2, defaults to
-`clinician` if omitted):
-- `clinician` — views predictions, uploads vitals for their own hospital
-- `hospital_admin` — manages that hospital's users/data
-- `super_admin` — platform operator; the only role that can deactivate a
-  hospital (`PATCH /hospitals/{id}`)
-
-The JWT from step 3 carries the user's hospital ID and role — every other
-endpoint trusts *only* what's inside that signed token, never a
-client-supplied hospital ID, so a logged-in user can't act on another
-hospital's data by changing a request parameter.
-
-For the full endpoint reference (what's auth-gated, request/response
-shapes, the vitals-upload and export flows) see
-`module1-auth/README.md`.
