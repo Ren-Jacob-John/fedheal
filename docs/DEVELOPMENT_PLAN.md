@@ -1,332 +1,209 @@
-# FedHeal — Development Plan to Launch (Target: October 12)
+# FedHeal — Development Plan (Merged): History + Oct 12 Launch
 
-**Prepared:** September 13, 2026
-**Horizon:** September 14 – October 12, 2026 (4 weeks, 3 phases)
-**Team assumption:** 4 members (per project README), working roughly in parallel
-module ownership rather than one person per phase.
+**Prepared:** September 14, 2026
+**Supersedes:** the original `docs/DEVELOPMENT_PLAN.md` (4-week, Oct-12-only
+plan) and the forward-looking portion (weeks 10–16) of
+`docs/16-week-development-plan.md`. Weeks 1–9 of that plan were already
+accurate and are carried forward here unchanged, so this is one
+continuous document instead of three overlapping ones.
 
----
-
-## 1. Where the project actually stands today
-
-This is an honest snapshot from reading the current codebase, not a generic
-template. It's the starting point every date below is built from.
-
-**Solid / working end-to-end:**
-- Module 1 (Auth) — JWT issuance, hospital multi-tenancy, httpOnly cookie
-  session, rate-limited login, CSV/JSON vitals upload, forwards to Module 2.
-- Module 2 (Validation) — full 5-stage pipeline (de-identification →
-  schema → plausibility → cross-field → isolation-forest outlier flag) with
-  best-effort reporting to Module 7.
-- Module 3 (Fed Learning) — single-process FedAvg simulation
-  (`simulate.py`) proven to run end-to-end across 3 simulated hospitals,
-  with a real logistic-regression model whose weights are actually
-  averaged.
-- Module 4 (Dashboard) — React app with login, federation map, rounds
-  rail, upload panel, flagged-record review, and a super-admin system map,
-  wired against Modules 1 and 7.
-- Module 6 (Condition Router) & Module 8 (Synthesis) — condition →
-  specialist(s) → explainer(s) → structured, clinician-facing report, with
-  honest `is_stub` / `requires_clinician_review` flags carried all the way
-  through.
-- Module 7 (Admin) — hospital oversight, round history, rolled-up
-  validation-flag counts, overview endpoint.
-
-**Real, but not yet proven — the biggest risk block:**
-- Module 5's imaging specialists (chest X-ray, retina, skin, segmentation)
-  and Module 6's histopathology/genomic specialists are **architecturally
-  complete but never actually trained or run** — `torch`/`torchvision`/
-  `nnunetv2`/`evo2`/`timm` aren't installed in the dev sandbox, so every one
-  of them has only ever executed its `ImportError` fallback path. They
-  degrade cleanly to a labeled `StubSpecialistModel`, which is good
-  engineering — but it means **no specialist model in the "current tier"
-  has been validated against real data yet.**
-- `module3-fedlearning/real_data.py` labels real hospital data with a
-  **rule-based placeholder** (`_placeholder_label`), not a real clinical
-  outcome — documented honestly in the code, but still a gap for anything
-  claiming to be a real diagnostic result.
-- `module5-modelzoo/router.py`'s `ClassifierBasedRouter` and
-  `server.py`'s real networked Flower server are reference
-  implementations, not yet exercised.
-
-**Missing outright:**
-- No automated tests anywhere in the repo (no `tests/`, no `pytest`
-  config) for any of the 8 modules.
-- No CI pipeline, no Dockerfiles/`docker-compose.yml`, no deployment
-  scripts or infra-as-code.
-- `docs/model-algorithm-catalog.md` and `docs/foundation-models-status.md`
-  are referenced repeatedly by the root README but the `docs/` folder is
-  empty — these don't exist yet.
-- No per-module `README.md`/`EXPLANATION.md` files (this is what part 2 of
-  this deliverable fixes).
-- No production secrets/config story beyond `.env.example` placeholders,
-  no HTTPS/TLS termination, no centralized logging, no backup/DR plan for
-  the Postgres/Supabase store.
-
-**Implication for the plan below:** four weeks is enough to take the
-**core federated-learning + validation + dashboard + tabular-specialist
-pipeline** to a tested, deployed, demo-ready state. It is **not** enough to
-also fully train and clinically validate every imaging/genomic foundation
-model from scratch. The plan therefore scopes the October 12 release
-around the tabular/vitals pipeline (TabPFN/XGBoost — genuinely installable
-and runnable today) plus the routing/explanation/synthesis architecture
-running honestly in **stub-aware mode** for the imaging/genomic
-specialists, with foundation-model training explicitly logged as
-post-launch roadmap. This is a scoping decision the team should confirm
-in the kickoff meeting below, not something to discover in week 3.
+**If you're deciding what to do with the two old files:** replace
+`docs/DEVELOPMENT_PLAN.md`'s content with this file, and either delete
+`docs/16-week-development-plan.md` or keep it purely as a dated
+historical record — nothing after this document should treat it as the
+active plan.
 
 ---
 
-## 2. Timeline at a glance
+## 1. Weeks 1–9 — what's already built (unchanged history)
 
-| Phase | Dates | Duration | Focus |
-|---|---|---|---|
-| Kickoff & scope lock | Sep 14 (Mon) | 1 day | Confirm scope decision above, assign module owners |
-| **Phase 1 — Development** | Sep 15 – Sep 27 | 2 weeks | Close functional gaps, wire missing pieces, write the two missing docs |
-| **Phase 2 — Testing & Hardening** | Sep 28 – Oct 5 | 8 days | Unit/integration/E2E tests, security pass, cross-module dry runs |
-| **Phase 3 — Deployment** | Oct 6 – Oct 11 | 6 days | Containerize, deploy to staging → prod, load-check, rehearse demo |
-| **Launch / handover** | Oct 12 (Mon) | — | Go-live, final demo, sign-off |
+| Week | Focus | Module(s) | Key deliverables | Status |
+|---|---|---|---|---|
+| 1 | Requirements & architecture | — | Problem statement, dataset shortlist, tech-stack decisions, repo scaffolding | ✅ Done |
+| 2 | Authentication & multi-tenancy | Module 1 | Hospital/user models, JWT login, hospital-scoped auth pattern | ✅ Done |
+| 3 | Data ingestion & validation | Module 2 | De-identification, schema/range/consistency checks, isolation-forest flagging | ✅ Done |
+| 4 | Local training + FedAvg core | Module 3 | `HospitalClient`, manual FedAvg loop (`simulate.py`) on synthetic non-IID data | ✅ Done |
+| 5 | Hospital dashboard v0 | Module 4 | Plain HTML/JS dashboard | ✅ Done (superseded by React rebuild) |
+| 6 | Model zoo & task router | Module 5 | `SpecialistModel` interface, XGBoost, legacy imaging CNNs, metadata router, fusion | ✅ Done |
+| 7 | Condition router & explainability | Module 6 | Condition → specialists + explainers auto-switch; SHAP, Grad-CAM, KG reasoner | ✅ Done |
+| 8 | Admin / platform module | Module 7 | Hospital oversight, round history, flag summaries, trigger-round endpoint | ✅ Done |
+| 9 | Data-flow integration | Modules 1, 3, 4 | Real pipeline: upload → validate → store → train on real data; DB-backed training status | ✅ Done |
 
----
+Nothing in this section changes — it's included so this one document is
+the complete story, not just the part that changed.
 
-## 3. Phase 1 — Development (Sep 15 – Sep 27)
+## 2. Why weeks 10–16 don't fit before Oct 12 as originally scoped
 
-Goal: every module does, in practice, what its README already claims —
-no more "architecturally correct but never executed" code paths in the
-launch scope.
+The original 16-week plan allotted **7 more calendar weeks** (10–16) to:
+real datasets/labels, real imaging training, real networked FL, security
+hardening, frontend rebuild, testing/deployment, and polish/demo.
 
-### 3.1 Module 1 — Auth
-- [ ] Confirm `FEDHEAL_COOKIE_SECURE` and CORS origin are environment-driven
-      and correctly set per deploy target (local/staging/prod).
-- [ ] Move the in-memory login rate limiter to a shared store (Redis, or
-      accept single-worker deployment explicitly and document the
-      limitation) before multi-worker deployment.
-- [ ] Add a `/health` endpoint (Modules 2 and 7 already have one; Module 1
-      doesn't) so the deployment phase has something to probe.
+Only **4 weeks** actually remain before Oct 12 (Sep 14 → Oct 12). That's
+roughly 3 weeks of planned work that has to either compress, get cut, or
+slip past the deadline. Since the last update, some of weeks 10–14 is
+already further along than originally scoped (see the status column
+below, carried from the 16-week plan) — which helps, but not enough to
+close a 3-week gap on its own. Section 4 below is the explicit,
+honest list of what doesn't make it by Oct 12 as a result.
 
-### 3.2 Module 2 — Validation
-- [ ] No functional gaps found. Add structured logging of rejection
-      reasons (already returned per-record; not yet persisted anywhere
-      queryable) so Module 7's flag counts can be audited later.
+**Current status of each remaining week, as of this merge** (unchanged
+from the 16-week plan's own tracking — this document doesn't relitigate
+what's already been assessed, just re-schedules it):
 
-### 3.3 Module 3 — Federated Learning
-- [ ] Decide and document the launch-scope model: keep the
-      `SGDClassifier` baseline (proven, explainable) as the reference
-      model for the demo; confirm XGBoost swap is **out of scope** for
-      Oct 12 unless capacity allows (see Module 5 note below — the
-      registry-level XGBoost/TabPFN work is separate from this
-      simulation's own baseline).
-- [ ] Run `simulate_real.py` end-to-end against real uploaded hospital
-      data at least once before Phase 2, to catch integration issues
-      between Module 2's validated records and Module 3's feature
-      extraction.
-- [ ] Explicitly document (in the module's own README — see deliverable
-      2) that `_placeholder_label` is a known, intentional limitation for
-      this release, not a silent bug — and record what a real clinical
-      label source would need to look like for the next release.
-- [ ] `server.py` (real networked Flower) stays **reference-only** for
-      this release; do not attempt real multi-machine networking in this
-      window — flag as Phase-2-post-launch roadmap.
+| Original week | Focus | Status going into this merge |
+|---|---|---|
+| 10 | Real datasets & labels | 🟡 Partial — real `label` field validated end-to-end (schema, CSV upload, human review); underlying feature set still synthetic-shaped, placeholder-label fallback still exists for missing labels |
+| 11 | Imaging track goes live | ⬜ Planned — no real training has happened yet |
+| 12 | Real networked federated learning | 🟢 **Now essentially done** — `server.py` + `client_runner.py` implemented and verified (see the module 3 update from this sprint); TLS still open |
+| 13 | Security & infra hardening | 🟡 Partial — per-service credentials, CORS lockdown, rate limiting, httpOnly cookies done; Alembic migrations still open |
+| 14 | Frontend rebuild | 🟡 Partial — federation map, operator views, upload, flagged-record review all live; explainer charts (Grad-CAM/SHAP) and Module 8 synthesis view still open |
+| 15 | Testing, QA & deployment | ⬜ Planned |
+| 16 | Polish, demo & submission | ⬜ Planned |
 
-### 3.4 Module 4 — Dashboard
-- [ ] Wire the dashboard's build against the actual deployed API URLs
-      (currently defaults to `localhost`); add a staging `.env` file.
-- [ ] Add basic error boundaries around `FederationMap`/`SystemMap` so a
-      malformed API response doesn't blank the whole page.
-- [ ] Quick accessibility pass on `LoginGate`/`UploadPanel` forms (label
-      associations, focus states) — cheap now, expensive to retrofit.
-- [ ] Production build (`npm run build`) verified to run clean with no
-      console warnings.
+Week 12 moved from 🟡 to essentially 🟢 since the 16-week plan was
+written, which is the main reason this merge is more optimistic on that
+front than a strict 3-week shortfall would otherwise suggest — it's real
+schedule slack the other weeks can borrow.
 
-### 3.5 Module 5 — Model Zoo
-- [ ] On a machine with disk/GPU headroom (not the dev sandbox), install
-      `torch`/`torchvision` and confirm `imaging_chest_xray.py` /
-      `imaging_retina.py` / `imaging_skin.py` / `imaging_segmentation.py`
-      at least **instantiate and run a forward pass** on dummy input —
-      this alone will catch any latent bugs in code that has literally
-      never executed.
-- [ ] Training data for these imaging models is **not currently
-      available in this repo** — training real weights is out of scope
-      for Oct 12. Launch scope = these specialists run in `is_stub` mode
-      honestly, which the dashboard and synthesis layer already surface
-      correctly. Confirm this is acceptable to stakeholders at kickoff.
-- [ ] TabPFN/XGBoost vitals specialist (`tabular_vitals*.py`) — this one
-      **is** installable and runnable today with no GPU. Prioritize
-      getting this specialist fully working end-to-end (real prediction,
-      not stub) since it's the one realistic "real model" story for the
-      Oct 12 demo.
-- [ ] Recreate `docs/model-algorithm-catalog.md` and
-      `docs/foundation-models-status.md` — referenced throughout the root
-      README and this module's own code comments, but currently missing
-      from the repo. Content already implicit in `registry.py`'s comments
-      and the root README's algorithm table; this is consolidation work,
-      not new research.
+## 3. The recompressed plan: Sep 14 → Oct 12
 
-### 3.6 Module 6 — Condition Router
-- [ ] Same imaging/genomic caveat as Module 5 — histopathology and
-      genomic-variant specialists stay stub-tier for this release.
-- [ ] SHAP explainer — confirm it runs against the real
-      TabPFN/XGBoost vitals specialist once that's wired live (3.5
-      above); this is the one explainer that can be end-to-end real for
-      launch.
-- [ ] Grad-CAM and knowledge-graph reasoner stay documented as
-      stub-degraded pending real imaging weights.
+### Sprint A — Sep 14 to Sep 20 (finish week 10, start week 13)
 
-### 3.7 Module 7 — Admin
-- [ ] No functional gaps found. Confirm `seed_demo.py` produces a
-      convincing, realistic dataset for the Oct 12 demo (multiple
-      hospitals, several rounds of history, a mix of clean and flagged
-      records).
+- **Real datasets & labels (P2 + P3):** stop relying on
+  `real_data.py`'s placeholder label as the default path. Require a real
+  label on upload where a hospital has one; make the placeholder
+  fallback an explicit, logged, clearly-flagged exception rather than
+  silent default behavior. Seed the demo/eval data using the **UCI Heart
+  Disease dataset** (public, no access approval needed, structurally
+  compatible with the vitals schema) so the federated-vs-solo accuracy
+  comparison is demonstrated on a real, cited dataset rather than
+  synthetic data, without waiting on anything outside the team's
+  control. **MIMIC-III/IV integration does not fit this window** — see
+  section 4.
+- **Security & infra hardening, start (P1):** begin the Alembic
+  migration setup in parallel — independent of the item above, so it
+  doesn't compete for the same people's time.
 
-### 3.8 Module 8 — Synthesis
-- [ ] No functional gaps found. Add one integration test exercising the
-      full Module 6 → Module 8 path with a mix of real and stub findings,
-      confirming `used_any_stub_models` and `requires_clinician_review`
-      are always correctly set (this is the module whose entire purpose
-      is not misleading a clinician, so it deserves the most scrutiny in
-      Phase 2 even though it has no functional gap today).
+### Sprint B — Sep 21 to Sep 27 (close out weeks 12 & 13, start week 14)
 
-### 3.9 Cross-cutting (all modules)
-- [ ] Write the two missing `docs/` files (3.5 above).
-- [ ] Write per-module `README.md`/`EXPLANATION.md` files — see the
-      companion deliverable to this plan.
-- [ ] Stand up a shared `docker-compose.yml` covering Modules 1, 2, 3, 4,
-      7 (the services that run continuously) for local/staging parity.
+- **Real networked FL, close-out (P3 + P1):** the core work is done.
+  Stretch goal only, not a launch blocker: run `client_runner.py` from
+  at least two genuinely separate machines/VMs once, since everything
+  verified so far (`run_local_smoke_test.sh`,
+  `test_client_runner_matches_simulation.py`) is localhost/subprocess-
+  based. If this doesn't fit, the localhost verification already done is
+  sufficient evidence the path itself is correct — don't let this block
+  anything else. **TLS stays out of scope** — see section 4.
+- **Security & infra hardening, finish (P1):** Alembic migrations
+  complete and applied to the staging database.
+- **Frontend, start (P4):** build the Module 8 synthesis view (rendering
+  a `SynthesisReport` — findings, disclaimer, stub markers — in the
+  dashboard) and SHAP chart rendering, since SHAP is the one explainer
+  that pairs with a genuinely real (non-stub) specialist today (the
+  vitals/TabPFN path). **Grad-CAM heatmap UI is deferred** — see section
+  4; there's no real imaging output yet for it to visualize.
 
-**Exit criteria for Phase 1:** every module's own documentation
-accurately describes what the code does when actually run, the vitals
-(TabPFN/XGBoost) path produces a real (non-stub) prediction end-to-end
-through Modules 1→2→5→6→8, and `docker compose up` brings up all five
-backend/frontend services locally with no manual patching.
+### Sprint C — Sep 28 to Oct 4 (finish week 14, start week 15)
 
----
+- **Frontend, finish (P4):** Module 8 synthesis view and SHAP charts
+  fully wired and demoable end-to-end (upload → route → synthesize →
+  view, in the dashboard, on real vitals data).
+- **Testing, QA & deployment, start (whole team):**
+  - Unit tests per module (prioritize Module 2's validation pipeline and
+    Module 5/6's stub-fallback logic — highest safety value per record).
+  - Integration tests across module boundaries (Module 1→2, 1→7,
+    5→6→8, and the dashboard against a running backend).
+  - Dockerfile per service; draft `docker-compose.yml` for full local
+    stack.
+  - Start the IRB/HIPAA/GDPR compliance write-up (documentation only —
+    what a real deployment would require, not the approval process
+    itself; the 16-week plan already scoped this correctly as
+    documentation, and that stays true here).
 
-## 4. Phase 2 — Testing & Hardening (Sep 28 – Oct 5)
-
-Goal: confidence that the system behaves correctly under real use and
-adversarial input, not just on the happy path a developer tried once.
-
-### 4.1 Unit tests (per module, target ≥70% coverage on business logic)
-- Module 1: token issuance/expiry, rate limiter, role checks, CSV/JSON
-  upload parsing edge cases (malformed rows, duplicate `patient_ref`).
-- Module 2: each of the 5 pipeline stages independently — forbidden
-  fields, boundary values on plausibility ranges, cross-field
-  contradictions, isolation-forest flagging on synthetic outliers.
-- Module 3: `get_model_parameters`/`set_model_parameters` round-trip,
-  `partition_for_hospitals`'s non-IID split, one full `HospitalClient.fit`
-  call against fixture data.
-- Module 5/6: registry fallback logic (`ImportError`/`OSError`/
-  `NotImplementedError` → `StubSpecialistModel`) — this is the single
-  most safety-critical piece of logic in the whole model zoo and
-  currently has zero test coverage.
-- Module 7: overview aggregation math, flag rollup counts.
-- Module 8: `used_any_stub_models` / `requires_clinician_review`
-  invariants under every combination of real/stub findings.
-
-### 4.2 Integration tests
-- Module 1 → Module 2: a batch with one forbidden field, one
-  out-of-range value, and one clean record — confirm exactly the right
-  per-record outcome.
-- Module 1 → Module 7: hospital status changes reflected in admin
-  overview within one poll cycle.
-- Module 5 → Module 6 → Module 8: full condition query (e.g. "breast
-  cancer") producing a `SynthesisReport` with correct disclaimer and
-  completeness flags.
-- Module 4 against a running Module 1 + Module 7: login → upload →
-  review-flagged-record → trigger round → see it reflected in the
-  federation map, as one scripted flow (Playwright or Cypress).
-
-### 4.3 End-to-end / system test
-- Full `simulate_real.py` run against a seeded multi-hospital dataset,
-  producing a federated-vs-solo accuracy comparison, with the dashboard
-  open and polling live during the run.
-
-### 4.4 Security & privacy review
-- Confirm the JWT secret, per-caller service keys
-  (`FEDHEAL_SVC_KEY_M3_M1`, `FEDHEAL_SVC_KEY_M2_M7`, `FEDHEAL_SVC_KEY_M3_M7`)
-  are unique, non-default values in every non-local environment.
-- Confirm CORS origins are locked to the real deployed dashboard URL, not
-  `*`, in staging and prod.
-- Re-run the de-identification field list (`rules.FORBIDDEN_FIELDS`)
-  against a real hospital export format if one becomes available, to
-  catch any institution-specific identifying field not yet on the list.
-- Dependency audit (`pip-audit` / `npm audit`) across all `requirements.txt`
-  and `package.json` files.
-
-### 4.5 Performance / load check
-- Module 2's isolation-forest batch flagging and Module 1's rate limiter
-  under a simulated burst upload (a few thousand records) — this is the
-  most likely real-world bottleneck given both are currently
-  single-process/in-memory.
-- Dashboard poll interval (`POLL_MS = 12000`) against however many
-  hospitals the demo/launch will actually seed — confirm it doesn't
-  hammer Module 1/7 under the real hospital count.
-
-**Exit criteria for Phase 2:** all Phase 1 exit-criteria flows pass under
-automated test, no known default/placeholder secret remains in any
-non-local config, and the team has a written record of what load level
-was actually tested (so Phase 3 doesn't deploy blind).
-
----
-
-## 5. Phase 3 — Deployment (Oct 6 – Oct 11)
-
-Goal: the system is reachable at a real URL, by real (or realistic demo)
-hospital users, in a state the team is comfortable calling "launched."
+### Sprint D — Oct 5 to Oct 11 (finish week 15, run week 16)
 
 | Day | Task |
 |---|---|
-| Oct 6 (Tue) | Finalize `docker-compose.yml` / Dockerfiles for all 5 services; build images |
-| Oct 7 (Wed) | Deploy to a staging environment (staging Supabase project, staging URLs); run the Phase 2 test suite against staging, not just local |
-| Oct 8 (Thu) | Fix anything staging surfaces that local didn't; confirm HTTPS/TLS on every public-facing service; lock CORS to prod dashboard origin |
-| Oct 9 (Fri) | Deploy to production; run `seed_demo.py`-equivalent realistic demo data (or real onboarded hospitals, if any are ready) |
-| Oct 10 (Sat) | Full dry-run of the Oct 12 demo/handover script end-to-end in prod; freeze scope — bug fixes only from here |
-| Oct 11 (Sun) | Buffer day for anything the dry run surfaced; finalize handover documentation |
-| **Oct 12 (Mon)** | **Launch / final demo / sign-off** |
+| Oct 5–6 | Finish `docker-compose.yml`; finish the CI pipeline (lint + unit tests on push); finish the compliance write-up |
+| Oct 7 | Deploy to staging; run the full test suite against staging, not just local |
+| Oct 8 | Fix whatever staging surfaces; lock down CORS/secrets for the real deployed origin |
+| Oct 9 | Deploy to production; seed realistic demo data |
+| Oct 10 | Full dry run of the Oct 12 demo/submission script in prod; freeze scope — bug fixes only from here |
+| Oct 11 | Buffer day; finalize report/slides/demo video |
+| **Oct 12** | **Launch / final demo / submission** |
 
-### 5.1 Deployment checklist
-- [ ] Environment variables for all four backend services set from a
-      secrets manager, not committed `.env` files.
-- [ ] Database migrations applied to the production Postgres/Supabase
-      instance (currently no migration tool in the repo —
-      `Base.metadata.create_all` is fine for dev, but a production launch
-      should use Alembic or equivalent so future schema changes don't
-      require a manual reconcile).
-- [ ] Logging aggregated somewhere queryable (even a simple hosted log
-      drain) — right now each service just prints/raises locally.
-- [ ] A written rollback plan: what to do if a deployed round of the
-      dashboard or a backend service needs to be reverted mid-demo.
-- [ ] Backup schedule confirmed for the production database.
+## 4. What has to slip past Oct 12 (explicit cut list)
 
-**Exit criteria for Phase 3 / launch:** every module reachable over
-HTTPS at its production URL, the full login → upload → validate → train
-round → review → synthesis flow works against production data, and the
-team has a rehearsed answer for "what's stubbed and why" for any
-imaging/genomic specialist a stakeholder asks about live.
+Being honest about this now is the entire point of merging these two
+plans — better to name it here than discover it on Oct 10.
 
----
+1. **Real imaging model training** (originally week 11 in full — fine-
+   tuning ResNet50 on APTOS 2019, DenseNet201 on a ChestX-ray14 subset,
+   etc.). This needs provisioned GPU time plus multi-day training/eval
+   cycles *per specialist* — trying to force it into this window would
+   put the whole rest of the plan at risk for a result that likely
+   wouldn't even be fully validated by Oct 12 anyway. Module 5's imaging
+   specialists continue running in their existing, honestly-labeled stub
+   mode for the Oct 12 release. This becomes the first item of
+   post-launch work.
+2. **MIMIC-III/IV integration.** Physionet credentialing and a data-use
+   agreement routinely take weeks and are outside engineering's control
+   on any timeline. UCI Heart Disease (Sprint A, above) is the real,
+   immediately-available substitute for Oct 12; MIMIC integration is
+   scheduled as the first follow-on to Sprint A's work, not abandoned.
+3. **TLS for the real networked FL server/client.** The plaintext gRPC
+   path is correct and sufficient for a localhost/LAN demo — both
+   `server.py` and `client_runner.py` already document this limitation
+   themselves. Needed before any real hospital traffic crosses the open
+   internet; not needed for Oct 12.
+4. **Grad-CAM heatmap overlay UI.** Directly downstream of item 1 — with
+   no real imaging weights, this UI would only ever render stub output,
+   which isn't compelling demo material and isn't worth the frontend
+   time this window. Revisit once item 1 has a real specialist to
+   visualize.
+5. **Real IRB approval, per-hospital data-governance agreements, and a
+   production secrets manager.** The original 16-week plan already
+   flagged these as outside a single team's control on any internal
+   timeline — that's still true. Sprint C's compliance write-up
+   documents what these would require; it doesn't (and can't) complete
+   them.
+6. **Cross-machine verification of the real networked FL path** is a
+   stretch goal in Sprint B, not a requirement — see Sprint B above.
 
-## 6. Risk register
+## 5. Risk register (updated)
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Imaging/genomic specialists never get real trained weights before Oct 12 | High (near-certain given no training data/GPU access documented) | Medium — mitigated by honest stub-labeling already built in | Scope launch around the vitals/TabPFN path (already decided above); present imaging/genomic tier explicitly as roadmap, not a gap discovered late |
-| Real clinical labels for `real_data.py` don't materialize in time | Medium | Medium | Keep placeholder label, document it prominently in Module 3's README and in any external-facing demo materials |
-| Single-process rate limiter / isolation forest doesn't hold up under real multi-hospital load | Medium | Medium | Load-test explicitly in Phase 2 (4.5); have Redis-backed limiter as a fallback plan if staging load test fails |
-| No CI pipeline means regressions ship silently during the compressed testing window | Medium | High | Stand up a minimal GitHub Actions workflow (lint + unit tests) in the first two days of Phase 1, not as an afterthought |
-| Four-week timeline for 8 modules across a 4-person team is tight | High | High | Module ownership split 2 people/module-pair rather than 1:1, so Phase 2 testing of a module isn't blocked on the same person who wrote it |
+| UCI Heart Disease swap (Sprint A) takes longer than a week and pushes into Sprint B's time | Medium | Medium | It's schedulable in parallel with Alembic work (different owners); if it slips, the existing validated-real-label path (already partially done) is an acceptable fallback demo story on its own |
+| Alembic migration surfaces a schema mismatch against real seeded/demo data | Low–Medium | Medium | Run it against a staging copy of the data first, not directly against anything Sprint C/D depends on |
+| Compressed testing window (Sprint C/D) means less time per module than the original plan's dedicated week 15 | Medium | High | Prioritize by safety value, not module order — Module 2 (data quality gate) and Module 5/6 (stub-fallback correctness) first, dashboard E2E and load testing if time remains |
+| Frontend work (SHAP charts + synthesis view) is new UI, not a port of something existing, and could run long | Medium | Medium | Scope the first version to the minimum that makes the vitals→SHAP→synthesis story demoable; polish is a Sprint D/week-16 item, not a Sprint B/C blocker |
+| Team morale/velocity risk from a visibly compressed timeline after a genuinely strong week-12 result | Low | Medium | This document's explicit cut list (section 4) exists partly for this reason — a clear, honest "here's what we're deliberately not doing and why" reads very differently from an unplanned scramble |
 
----
+## 6. Ownership (unchanged from the 16-week plan's roles)
 
-## 7. Suggested ownership split (4-person team)
+**P1** = Backend/Auth, **P2** = Data Engineer, **P3** = ML Engineer, **P4**
+= Frontend — carried over from the existing team-assignment convention.
+Sprint A/B/C/D above assign work by this same rotation; adjust to your
+actual team size the same way the original plan already recommended.
 
-- **Owner A** — Module 1 (Auth) + Module 4 (Dashboard) — the
-  user-facing login/upload/review path.
-- **Owner B** — Module 2 (Validation) + Module 7 (Admin) — the
-  data-quality and operator-oversight path.
-- **Owner C** — Module 3 (Fed Learning) — the core FedAvg pipeline, plus
-  the real-data integration test in 4.3.
-- **Owner D** — Module 5 + Module 6 + Module 8 — the model
-  zoo/routing/synthesis chain, and the two missing `docs/` files.
+## 7. Deployment checklist (Sprint D)
 
-All four share Phase 3 deployment work and the Oct 10 dry run.
+- [ ] Environment variables for all services set from a secrets manager
+      in staging/prod, not committed `.env` files.
+- [ ] Alembic migrations applied to the production database (this is
+      the one item that changes here vs. the original 4-week plan, which
+      still assumed `Base.metadata.create_all`).
+- [ ] Logging aggregated somewhere queryable.
+- [ ] Written rollback plan for a mid-demo revert.
+- [ ] Backup schedule confirmed for the production database.
+- [ ] CORS locked to the real deployed dashboard origin (already largely
+      done per week 13's status — verify against the actual prod URL,
+      not just staging).
+
+**Exit criteria for Oct 12:** every module reachable at its production
+URL, the full login → upload → validate → real-labeled training round
+→ review → SHAP-explained synthesis flow works against production data,
+CI is green, and the team has a rehearsed, honest answer — this
+document — for anything a stakeholder asks about what's stubbed, what's
+deferred, and why.
