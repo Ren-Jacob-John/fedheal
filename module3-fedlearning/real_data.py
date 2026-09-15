@@ -18,20 +18,42 @@ UCI-style features), which is fine since the model just sees floats.
         "bmi (derived)", "weight_kg", "medication_count", "medication_mg_total",
     ]
 
-Known gap, stated plainly rather than hidden: VitalsRecord (Module 1/2's
-schema) has no real diagnosis/outcome field yet — hospitals haven't been
-asked to supply one. Records DO carry an optional `label`, but until a
-real clinical outcome is wired in, any record missing one gets a
-rule-based PLACEHOLDER label (see `_placeholder_label` below) purely so
-this loader is runnable end-to-end today. Swap `_placeholder_label` for a
-real outcome field the moment hospitals have one to upload — do not treat
-its output as a clinical signal.
+LABELS (changed in Sprint A — read this if you remember the old behaviour)
+-------------------------------------------------------------------------
+This loader used to silently substitute a rule-based PLACEHOLDER label for
+any record that arrived without one. That made the *default* end-to-end
+path a model trained partly on labels no clinician ever produced, with
+nothing in the output saying so.
+
+That is now inverted:
+
+  * `GET /vitals/export` defaults to `labeled_only=true`, so unlabeled
+    records don't reach this module at all unless explicitly requested.
+  * `_placeholder_label()` is only reachable via an explicit
+    `allow_placeholder_labels=True` argument (surfaced as
+    `--allow-placeholder-labels` on simulate_real.py and client_runner.py).
+  * Without that flag, hitting an unlabeled record raises
+    `UnlabeledDataError` and names the hospital. Loudly failing beats
+    quietly fabricating.
+  * With the flag, every loader returns a `LabelProvenance` alongside the
+    data, logs a warning banner, and callers stamp the round's admin
+    report so a placeholder-contaminated accuracy number can never be
+    mistaken later for a real one.
+
+Hospitals that genuinely have outcomes should be marked `requires_label`
+in Module 1, which makes Module 2 reject their unlabeled uploads outright
+(rules.check_required_label) — the problem gets caught at upload time, by
+the person who can fix the export, instead of at training time.
 """
+import logging
+from dataclasses import dataclass, field
 import os
 
 import httpx
 import numpy as np
 from sklearn.model_selection import train_test_split
+
+logger = logging.getLogger(__name__)
 
 AUTH_API_URL = os.environ.get("FEDHEAL_AUTH_API_URL", "http://localhost:8001")
 SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M1", "dev-only-key-module3-to-module1")
@@ -69,6 +91,47 @@ _FEATURE_MEAN = np.array([50.0, 120.0, 80.0, 75.0, 75.0, 170.0, 2.0, 150.0])
 _FEATURE_STD = np.array([20.0, 20.0, 10.0, 12.0, 18.0, 12.0, 2.0, 120.0])
 
 
+class UnlabeledDataError(ValueError):
+    """
+    Raised when a hospital's export contains records with no real outcome
+    label and the caller hasn't explicitly opted into placeholder labels.
+
+    Its own exception type (not a bare ValueError) so callers can catch
+    exactly this and print the fix, rather than lumping it in with
+    "not enough records" and every other ValueError this module raises.
+    """
+
+
+@dataclass
+class LabelProvenance:
+    """
+    Where a partition's labels came from. Returned alongside (X, y) so a
+    caller can never hold the data without also holding the answer to
+    "is any of this made up?".
+    """
+    hospital: str
+    total: int = 0
+    real: int = 0
+    placeholder: int = 0
+    _hospitals: list[str] = field(default_factory=list)
+
+    @property
+    def is_clean(self) -> bool:
+        return self.placeholder == 0
+
+    def banner(self) -> str:
+        if self.is_clean:
+            return (f"labels: {self.real}/{self.total} real clinical outcomes "
+                    f"({self.hospital}) — no placeholders")
+        pct = self.placeholder / self.total if self.total else 0
+        return (
+            f"!! PLACEHOLDER LABELS IN USE ({self.hospital}): "
+            f"{self.placeholder}/{self.total} ({pct:.0%}) of labels are rule-based "
+            f"stand-ins, NOT clinical outcomes. Any accuracy number derived from "
+            f"this run is not a clinical result."
+        )
+
+
 def _placeholder_label(record: dict) -> int:
     """
     PLACEHOLDER ONLY — see module docstring. A simple, deterministic
@@ -76,9 +139,52 @@ def _placeholder_label(record: dict) -> int:
     real diagnosis labels exist: flags records with elevated systolic BP
     or a high medication load. This is not a diagnosis and must not be
     presented as one anywhere downstream.
+
+    As of Sprint A this is unreachable unless a caller explicitly passes
+    allow_placeholder_labels=True. Kept rather than deleted because a
+    hospital onboarding without outcomes yet is a real situation — it just
+    isn't the default one any more.
     """
     systolic = record.get("systolic_bp") or 0
     return int(systolic >= 140 or (record.get("medication_mg_total") or 0) >= 300)
+
+
+def _labels_for(records: list[dict], hospital: str,
+                allow_placeholder_labels: bool) -> tuple[np.ndarray, LabelProvenance]:
+    """
+    Turns records into a y vector, and refuses to invent anything unless
+    told to. Single implementation shared by both loaders below, so the
+    per-hospital client path and the pooled simulation path can't drift
+    into different label policies.
+    """
+    prov = LabelProvenance(hospital=hospital, total=len(records))
+    unlabeled = [r for r in records if r.get("label") is None]
+
+    if unlabeled and not allow_placeholder_labels:
+        raise UnlabeledDataError(
+            f"{hospital}: {len(unlabeled)} of {len(records)} validated records have "
+            f"no clinical outcome label.\n"
+            f"  Fix (preferred): upload the real outcomes. Mark this hospital "
+            f"requires_label=true in Module 1 so unlabeled uploads are rejected "
+            f"at the door instead of reaching training.\n"
+            f"  Override (demo only): pass --allow-placeholder-labels to train on "
+            f"rule-based stand-in labels. The run will be flagged as "
+            f"non-clinical everywhere it's reported."
+        )
+
+    y = []
+    for r in records:
+        if r.get("label") is not None:
+            y.append(int(r["label"]))
+            prov.real += 1
+        else:
+            y.append(_placeholder_label(r))
+            prov.placeholder += 1
+
+    if prov.placeholder:
+        logger.warning(prov.banner())
+
+    return np.array(y), prov
 
 
 def _record_to_features(record: dict) -> np.ndarray:
@@ -93,11 +199,23 @@ def list_active_hospitals() -> list[dict]:
     return [h for h in resp.json() if h.get("is_active")]
 
 
-def fetch_hospital_vitals(hospital_id: str, include_flagged: bool = False) -> list[dict]:
-    """Pulls one hospital's validated vitals from Module 1's export endpoint."""
+def fetch_hospital_vitals(hospital_id: str, include_flagged: bool = False,
+                          labeled_only: bool = True) -> list[dict]:
+    """
+    Pulls one hospital's validated vitals from Module 1's export endpoint.
+
+    `labeled_only=True` (the Sprint A default) asks Module 1 to filter out
+    records with no real outcome server-side, so unlabeled data never even
+    crosses the wire into this module. Callers that have opted into
+    placeholder labels pass False.
+    """
     resp = httpx.get(
         f"{AUTH_API_URL}/vitals/export",
-        params={"hospital_id": hospital_id, "include_flagged": include_flagged},
+        params={
+            "hospital_id": hospital_id,
+            "include_flagged": include_flagged,
+            "labeled_only": labeled_only,
+        },
         headers={"X-Service-Key": SERVICE_KEY},
         timeout=10.0,
     )
@@ -121,7 +239,8 @@ def resolve_hospital_id(hospital_name: str) -> str:
 
 
 def load_single_hospital_partition(
-    hospital_id: str, min_records: int = 10, include_flagged: bool = False
+    hospital_id: str, min_records: int = 10, include_flagged: bool = False,
+    allow_placeholder_labels: bool = False,
 ):
     """
     Same per-record -> (X, y) conversion as load_real_partitions() below, but
@@ -134,24 +253,36 @@ def load_single_hospital_partition(
     Raises ValueError (not silently returning empty arrays) if this hospital
     doesn't have enough validated data yet, so client_runner.py fails loudly
     instead of "federating" on nothing.
+
+    Returns (X, y, provenance). The third element is new in Sprint A — the
+    signature change is deliberate rather than making it optional, so every
+    call site has to acknowledge label provenance instead of inheriting a
+    silent default.
     """
-    records = fetch_hospital_vitals(hospital_id, include_flagged=include_flagged)
+    records = fetch_hospital_vitals(
+        hospital_id,
+        include_flagged=include_flagged,
+        labeled_only=not allow_placeholder_labels,
+    )
     if len(records) < min_records:
         raise ValueError(
-            f"hospital {hospital_id} has only {len(records)} validated vitals "
+            f"hospital {hospital_id} has only {len(records)} validated, "
+            f"{'labeled ' if not allow_placeholder_labels else ''}vitals "
             f"records (need >= {min_records}). Upload more via the dashboard "
-            "before running client_runner.py for this hospital."
+            f"before running client_runner.py for this hospital."
+            + ("" if allow_placeholder_labels else
+               "\n  If this hospital has records but no outcome labels, that's "
+               "the cause — check GET /training-status, which now reports "
+               "labeled_records separately.")
         )
 
     X = np.stack([_record_to_features(r) for r in records])
-    y = np.array([
-        r["label"] if r.get("label") is not None else _placeholder_label(r)
-        for r in records
-    ])
-    return X, y
+    y, provenance = _labels_for(records, hospital_id, allow_placeholder_labels)
+    return X, y, provenance
 
 
-def load_real_partitions(min_records_per_hospital: int = 10):
+def load_real_partitions(min_records_per_hospital: int = 10,
+                         allow_placeholder_labels: bool = False):
     """
     Returns (hospital_names, partitions) for every active hospital that has
     at least `min_records_per_hospital` validated vitals records — the same
@@ -160,24 +291,31 @@ def load_real_partitions(min_records_per_hospital: int = 10):
 
     Hospitals below the threshold are skipped (reported, not silently
     dropped) rather than trained on too little data to mean anything.
+
+    Returns (hospital_names, partitions, provenance) — the third element is
+    new in Sprint A; see `_labels_for`. Provenance is per-hospital, because
+    "2 of 4 hospitals are running on placeholder labels" is a materially
+    different situation from "all 4 are", and a single pooled flag would
+    lose that.
     """
-    hospital_names, partitions = [], []
+    hospital_names, partitions, provenances = [], [], []
     for hospital in list_active_hospitals():
-        records = fetch_hospital_vitals(hospital["id"])
+        records = fetch_hospital_vitals(
+            hospital["id"], labeled_only=not allow_placeholder_labels
+        )
         if len(records) < min_records_per_hospital:
-            print(f"  skipping {hospital['name']}: only {len(records)} validated records "
-                  f"(need >= {min_records_per_hospital})")
+            suffix = "" if allow_placeholder_labels else " with outcome labels"
+            print(f"  skipping {hospital['name']}: only {len(records)} validated records"
+                  f"{suffix} (need >= {min_records_per_hospital})")
             continue
 
         X = np.stack([_record_to_features(r) for r in records])
-        y = np.array([
-            r["label"] if r.get("label") is not None else _placeholder_label(r)
-            for r in records
-        ])
+        y, provenance = _labels_for(records, hospital["name"], allow_placeholder_labels)
         hospital_names.append(hospital["name"])
         partitions.append((X, y))
+        provenances.append(provenance)
 
-    return hospital_names, partitions
+    return hospital_names, partitions, provenances
 
 
 def carve_global_holdout(partitions, test_size: float = 0.15, seed: int = 42):

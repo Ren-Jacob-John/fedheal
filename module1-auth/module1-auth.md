@@ -75,6 +75,44 @@ uvicorn main:app --reload --port 8001
 
 Interactive API docs: `http://localhost:8001/docs`
 
+### Database schema — Alembic (new in Sprint A)
+
+Schema changes are moving from `Base.metadata.create_all()` to Alembic
+migrations. Sprint A set this up; Sprint B finishes the move and removes
+`create_all` entirely.
+
+```bash
+# FRESH database (nothing there yet):
+alembic upgrade head
+
+# EXISTING database that create_all already built (every local SQLite
+# file and the current Supabase project): tell Alembic it's already at
+# the baseline, THEN apply the new migrations.
+alembic stamp 0001_baseline
+alembic upgrade head
+
+# Review the SQL before it touches staging/prod:
+alembic upgrade head --sql
+
+# After changing models.py:
+alembic revision --autogenerate -m "what changed"
+```
+
+Alembic reads `FEDHEAL_DATABASE_URL` — the same env var `database.py`
+reads — so `alembic upgrade head` can never migrate a different database
+than the app is about to write to. `alembic.ini` deliberately leaves
+`sqlalchemy.url` empty; the Supabase password does not belong in version
+control.
+
+**Check before you stamp.** Stamping a database that does NOT have the
+tables leaves Alembic believing they exist, and the baseline migration
+will then be skipped forever. `sqlite3 fedmed_auth.db ".tables"` or `\dt`
+in psql first.
+
+Set `FEDHEAL_AUTO_CREATE_TABLES=false` once migrations are applied to an
+environment, so `create_all` stops running alongside Alembic and the two
+can't drift.
+
 **Required environment variables** (see `.env.example` for the full,
 commented list):
 - `FEDHEAL_DATABASE_URL` — Postgres/Supabase connection string; omit for
@@ -87,6 +125,8 @@ commented list):
 - `FEDHEAL_DASHBOARD_ORIGIN` — comma-separated list of allowed CORS
   origins (the dashboard's actual URL(s)).
 - `FEDHEAL_COOKIE_SECURE` — set `true` once served over HTTPS.
+- `FEDHEAL_AUTO_CREATE_TABLES` — defaults `true`. Set `false` in any
+  environment managed by Alembic (see above).
 
 ## How it depends on / is depended on by other modules
 
@@ -98,12 +138,46 @@ commented list):
 - **Nobody else should ever accept a hospital ID except from this
   module's token** — that invariant is the entire point of the module.
 
+### Label provenance (new in Sprint A)
+
+Two columns were added so "is this label a real clinical outcome?" is
+answerable from the database rather than inferred:
+
+- `hospitals.requires_label` — an explicit per-tenant declaration that
+  this hospital has real outcomes. When true, Module 2 **rejects** any
+  uploaded record without a `label` (`rules.check_required_label`), so a
+  broken EHR export is caught at upload time by the person who can fix
+  it, instead of at training time by someone else. Defaults false, which
+  preserves the previous behaviour for existing tenants — it's a decision
+  each hospital makes, not something to infer from whether labels happen
+  to show up.
+- `vitals_records.label_source` — `"hospital"` or `"missing"`. There is
+  deliberately **no** `"placeholder"` value: Module 3's rule-based
+  placeholder label is computed at training time and never written back
+  here, so this column can't ever assert that a made-up label is a
+  clinical fact.
+
+`GET /vitals/export` now defaults to `labeled_only=true` — **a breaking
+default change**. Previously it returned unlabeled records too and
+Module 3 quietly substituted a placeholder label for each, which made the
+default end-to-end path train partly on labels no clinician produced.
+Pass `labeled_only=false` for the old behaviour.
+
+`GET /training-status` gained `labeled_records`, `unlabeled_records`,
+`label_coverage`, and a new `awaiting_labels` status — a hospital sitting
+on 500 unlabeled records used to report `ready_for_training`.
+
 ## Known limitations / current status
 
 - The login rate limiter is in-memory and per-process — fine for a
   single-worker deployment, but limits reset independently per worker in
   a multi-process deployment. Needs a shared store (Redis) before scaling
   workers horizontally.
-- No automated tests yet.
+- No automated tests for this module specifically, though Module 3's
+  `test_client_runner_matches_simulation.py` exercises its data path, and
+  `module3-fedlearning/seed_uci_heart.py` is an end-to-end exercise of
+  the upload -> validate -> store path (dedicated unit tests are Sprint C).
+- `create_all` and Alembic are both live during this transitional sprint.
+  That is deliberate but temporary — Sprint B removes `create_all`.
 - No `/health` endpoint (Modules 2 and 7 have one; this module doesn't
   yet) — worth adding for deployment health checks.

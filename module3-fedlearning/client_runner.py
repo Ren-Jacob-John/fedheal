@@ -86,6 +86,16 @@ def parse_args() -> argparse.Namespace:
              "haven't been human-approved yet (see FlaggedReview.jsx).",
     )
     parser.add_argument(
+        "--allow-placeholder-labels",
+        action="store_true",
+        help="Train on records that have NO real clinical outcome, using "
+             "real_data._placeholder_label's rule-based stand-in. Off by "
+             "default as of Sprint A: without this, unlabeled records are "
+             "excluded server-side and an all-unlabeled hospital fails "
+             "loudly. Only for demos on a hospital that hasn't wired up "
+             "outcomes yet — any accuracy from such a run is NOT clinical.",
+    )
+    parser.add_argument(
         "--secure",
         dest="insecure",
         action="store_false",
@@ -110,14 +120,20 @@ def main() -> None:
 
     print(f"Loading validated vitals for hospital {hospital_id} from Module 1...")
     try:
-        X, y = load_single_hospital_partition(
+        X, y, provenance = load_single_hospital_partition(
             hospital_id,
             min_records=args.min_records,
             include_flagged=args.include_flagged,
+            allow_placeholder_labels=args.allow_placeholder_labels,
         )
     except (httpx.HTTPError, ValueError) as e:
         print(f"Could not load this hospital's data: {e}")
         sys.exit(1)
+
+    # Printed before any training starts, so an operator watching the
+    # console sees the label situation first rather than discovering it
+    # after eight rounds of plausible-looking accuracy numbers.
+    print(f"  {provenance.banner()}")
 
     # Stratifying needs every class to have >= 2 members (one can go to
     # train, one to test) — "more than one distinct class" isn't enough,

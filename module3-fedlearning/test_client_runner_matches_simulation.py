@@ -106,6 +106,10 @@ for h in range(n_hospitals):
             medication_count=random.randint(0, 5),
             medication_mg_total=random.uniform(0, 400),
             label=int(systolic >= 140),
+            # Inserted straight into the DB, bypassing the upload endpoint
+            # that normally sets this — so it has to be set explicitly, or
+            # these rows would claim "missing" while carrying a label.
+            label_source="hospital",
             validation_status="passed",
         ))
 db.commit()
@@ -200,7 +204,11 @@ def run_in_process_reproduction(hospital_ids, n_records, rounds) -> float:
     """
     clients = []
     for hid in sorted(hospital_ids):
-        X, y = load_single_hospital_partition(hid, min_records=n_records)
+        # Sprint A: load_single_hospital_partition now returns provenance as
+        # a third element. This test seeds its own hospitals with explicit
+        # labels, so provenance is always clean here and is discarded —
+        # client_runner.py is the path that actually prints it.
+        X, y, _provenance = load_single_hospital_partition(hid, min_records=n_records)
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42, stratify=safe_stratify(y)
         )

@@ -50,6 +50,30 @@ def check_plausible_ranges(record: VitalsRecord) -> list[str]:
     return reasons
 
 
+def check_required_label(record: VitalsRecord) -> list[str]:
+    """
+    Sprint A: a hospital that HAS real clinical outcomes must actually send
+    them. Whether this check runs at all is decided per-batch by the caller
+    (Module 1 passes require_label=True when that hospital is configured as
+    a label supplier) — the rule itself lives here so Module 1 never grows
+    a second, drifting copy of validation logic.
+
+    Rejecting rather than flagging is deliberate. A flagged record is still
+    stored and still reachable by training after human review; the entire
+    point of this check is that an unlabeled record from a
+    label-supplying hospital indicates a broken export, not a borderline
+    measurement. Better to fail the row and have someone fix the pipeline
+    than to store it and quietly fall back to a placeholder label later.
+    """
+    if record.label is None:
+        return [
+            "missing required outcome label — this hospital is configured as a "
+            "label supplier, so every uploaded record must carry a real "
+            "clinical outcome (label=0 or label=1)"
+        ]
+    return []
+
+
 def check_cross_field_consistency(record: VitalsRecord) -> list[str]:
     """
     Checks where one field's value only makes sense in light of another.

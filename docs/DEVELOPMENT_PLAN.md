@@ -52,10 +52,10 @@ what's already been assessed, just re-schedules it):
 
 | Original week | Focus | Status going into this merge |
 |---|---|---|
-| 10 | Real datasets & labels | 🟡 Partial — real `label` field validated end-to-end (schema, CSV upload, human review); underlying feature set still synthetic-shaped, placeholder-label fallback still exists for missing labels |
+| 10 | Real datasets & labels | 🟢 **Done in Sprint A** — placeholder-label fallback is now opt-in and loudly flagged, not the default; demo/eval data seeded from UCI Heart Disease (Cleveland) with real outcome labels. Caveat: only 3 of the 8 feature slots carry real Cleveland measurements — see `SPRINT-A-REPORT.md` |
 | 11 | Imaging track goes live | ⬜ Planned — no real training has happened yet |
 | 12 | Real networked federated learning | 🟢 **Now essentially done** — `server.py` + `client_runner.py` implemented and verified (see the module 3 update from this sprint); TLS still open |
-| 13 | Security & infra hardening | 🟡 Partial — per-service credentials, CORS lockdown, rate limiting, httpOnly cookies done; Alembic migrations still open |
+| 13 | Security & infra hardening | 🟡 Partial — per-service credentials, CORS lockdown, rate limiting, httpOnly cookies done; Alembic **set up and verified in Sprint A** (Module 1: baseline + label-provenance revisions, both upgrade paths tested), still to apply to staging in Sprint B |
 | 14 | Frontend rebuild | 🟡 Partial — federation map, operator views, upload, flagged-record review all live; explainer charts (Grad-CAM/SHAP) and Module 8 synthesis view still open |
 | 15 | Testing, QA & deployment | ⬜ Planned |
 | 16 | Polish, demo & submission | ⬜ Planned |
@@ -67,7 +67,11 @@ schedule slack the other weeks can borrow.
 
 ## 3. The recompressed plan: Sep 14 → Oct 12
 
-### Sprint A — Sep 14 to Sep 20 (finish week 10, start week 13)
+### Sprint A — Sep 14 to Sep 20 (finish week 10, start week 13) — ✅ COMPLETE
+
+> Outcome, caveats, and the two decisions that need the team's attention:
+> **`docs/SPRINT-A-REPORT.md`**. Read that before the Sprint B planning
+> session — one finding changes what the Oct 12 demo can claim.
 
 - **Real datasets & labels (P2 + P3):** stop relying on
   `real_data.py`'s placeholder label as the default path. Require a real
@@ -174,7 +178,8 @@ plans — better to name it here than discover it on Oct 10.
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| UCI Heart Disease swap (Sprint A) takes longer than a week and pushes into Sprint B's time | Medium | Medium | It's schedulable in parallel with Alembic work (different owners); if it slips, the existing validated-real-label path (already partially done) is an acceptable fallback demo story on its own |
+| ~~UCI Heart Disease swap (Sprint A) takes longer than a week~~ | — | — | **Retired — did not materialize.** Both Sprint A workstreams landed. Replaced by the row below. |
+| The UCI seed supplies only 3 of 8 vitals features, so accuracy is far below published Cleveland results and the federated-vs-solo delta swings sign between random seeds | **Materialized** | Medium | Report the 20-seed distribution (federation wins 17/20, mean +0.077), never a single run — `compare_uci_heart.py --sweep 20` enforces this. Do NOT close the gap by widening the vitals schema before Oct 12: that changes `N_FEATURES` and breaks Modules 3, 5 and 6. See `SPRINT-A-REPORT.md` |
 | Alembic migration surfaces a schema mismatch against real seeded/demo data | Low–Medium | Medium | Run it against a staging copy of the data first, not directly against anything Sprint C/D depends on |
 | Compressed testing window (Sprint C/D) means less time per module than the original plan's dedicated week 15 | Medium | High | Prioritize by safety value, not module order — Module 2 (data quality gate) and Module 5/6 (stub-fallback correctness) first, dashboard E2E and load testing if time remains |
 | Frontend work (SHAP charts + synthesis view) is new UI, not a port of something existing, and could run long | Medium | Medium | Scope the first version to the minimum that makes the vitals→SHAP→synthesis story demoable; polish is a Sprint D/week-16 item, not a Sprint B/C blocker |

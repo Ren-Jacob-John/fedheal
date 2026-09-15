@@ -9,6 +9,8 @@ Pipeline for every batch upload, in order:
   2. Schema validation (correct fields/types — pydantic)
   3. Plausibility range checks (hard reject)
   4. Cross-field consistency checks (hard reject)
+  4b. Required-outcome-label check, ONLY when the caller sets
+      require_label=true (hard reject) — see rules.check_required_label
   5. Isolation-forest outlier flag across the batch (soft flag, not rejection)
 
 Only records that pass 1-4 are eligible to reach Module 3's local training —
@@ -27,7 +29,12 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel, ValidationError
 
 from anomaly import flag_outliers
-from rules import check_forbidden_fields, check_plausible_ranges, check_cross_field_consistency
+from rules import (
+    check_forbidden_fields,
+    check_plausible_ranges,
+    check_cross_field_consistency,
+    check_required_label,
+)
 from schema import VitalsRecord
 from docs_theme import mount_custom_docs
 
@@ -76,6 +83,11 @@ class BatchValidationRequest(BaseModel):
     # calling it without a tenant context. When present, flag/reject counts
     # get attributed to this hospital for Module 7's dashboard.
     hospital_id: str | None = None
+    # Sprint A. Defaults False so every existing caller behaves exactly as
+    # before; Module 1 sets it to True for hospitals flagged as label
+    # suppliers. This service doesn't (and shouldn't) know which hospitals
+    # those are — that's tenant configuration, and it lives in Module 1.
+    require_label: bool = False
 
 
 class BatchValidationResponse(BaseModel):
@@ -86,7 +98,11 @@ class BatchValidationResponse(BaseModel):
     results: list[ValidationResult]
 
 
-def _validate_records(raw_records: list[dict], hospital_id: str | None) -> BatchValidationResponse:
+def _validate_records(
+    raw_records: list[dict],
+    hospital_id: str | None,
+    require_label: bool = False,
+) -> BatchValidationResponse:
     """
     The actual five-stage gate, shared by both the JSON endpoint and the
     CSV endpoint below — one implementation, two ways in, so CSV uploads
@@ -121,8 +137,13 @@ def _validate_records(raw_records: list[dict], hospital_id: str | None) -> Batch
             ))
             continue
 
-        # 3 & 4. Plausibility + cross-field consistency
+        # 3, 4 & 4b. Plausibility + cross-field consistency + (optionally)
+        # the required-label check. Collected together so a record with
+        # several problems reports all of them in one pass, rather than
+        # making the uploader fix one, re-upload, and discover the next.
         reasons = check_plausible_ranges(record) + check_cross_field_consistency(record)
+        if require_label:
+            reasons += check_required_label(record)
         if reasons:
             results.append(ValidationResult(
                 patient_ref=record.patient_ref, status="rejected", reasons=reasons
@@ -155,7 +176,7 @@ def _validate_records(raw_records: list[dict], hospital_id: str | None) -> Batch
 
 @app.post("/validate/vitals", response_model=BatchValidationResponse)
 def validate_vitals_batch(payload: BatchValidationRequest):
-    return _validate_records(payload.records, payload.hospital_id)
+    return _validate_records(payload.records, payload.hospital_id, payload.require_label)
 
 
 # CSV upload — most hospitals will export from their own EHR/spreadsheet
@@ -170,6 +191,7 @@ def validate_vitals_batch(payload: BatchValidationRequest):
 async def validate_vitals_csv(
     file: UploadFile = File(...),
     hospital_id: Optional[str] = Form(None),
+    require_label: bool = Form(False),
 ):
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Expected a .csv file")
@@ -190,7 +212,7 @@ async def validate_vitals_csv(
         {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in rec.items()}
         for rec in records
     ]
-    return _validate_records(records, hospital_id)
+    return _validate_records(records, hospital_id, require_label)
 
 
 @app.get("/health")

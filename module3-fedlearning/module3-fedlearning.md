@@ -99,6 +99,17 @@ set no single hospital trained or tested on — the fair comparison of
 cd module3-fedlearning
 pip install -r requirements.txt
 
+# Verify the vendored UCI Heart Disease dataset:
+python uci_heart.py --verify
+
+# Federated-vs-solo on REAL UCI data, offline (no services needed).
+# This is the defensible number — always run the sweep before quoting it:
+python compare_uci_heart.py --sweep 20
+
+# Seed the demo/eval data into Module 1 through the real upload path
+# (needs Modules 1 and 2 running):
+python seed_uci_heart.py --hospitals 3
+
 # Synthetic-data simulation (no other services needed):
 python simulate.py
 
@@ -140,6 +151,24 @@ python client_runner.py --hospital-name "Rural Clinic"     --server localhost:80
   python test_client_runner_matches_simulation.py --hospitals 3 --records-per-hospital 20
   ```
 
+### Which comparison script to run
+
+| Script | Data | Labels | Needs services? |
+|---|---|---|---|
+| `simulate.py` | synthetic (`make_classification`) | synthetic | No |
+| `compare_uci_heart.py` | **real** (UCI Cleveland) | **real** | No |
+| `simulate_real.py` | whatever is in Module 1 | real (placeholders opt-in) | Yes |
+
+`simulate.py` isn't obsolete — it's still the only way to stress-test
+FedAvg under controlled skew (alpha sweeps) that a fixed 303-record real
+dataset can't produce. `compare_uci_heart.py` is what to quote.
+`simulate_real.py` is what proves the integration works end to end.
+
+Both `compare_uci_heart.py` and `simulate_real.py` import their FedAvg
+aggregation and solo baseline from `fedavg.py`, so the offline number and
+the through-the-stack number are the same math, not two implementations
+that happen to agree.
+
 **Key environment variables** (read via `real_data.py` / `simulate_real.py`):
 match Module 1's `FEDHEAL_SVC_KEY_M3_M1` and the URL Module 1 is
 reachable at.
@@ -157,9 +186,29 @@ reachable at.
 - The shared model is a simple logistic regression by design (see
   `model.py`'s docstring) — swapping in XGBoost/PyTorch is future work
   that doesn't require changing `simulate.py`'s round-driving loop.
-- `_placeholder_label` in `real_data.py` is a rule-based stand-in for a
-  real clinical outcome label — flag this clearly in any external-facing
-  demo or documentation until real labels are wired up.
+- **Labels (changed in Sprint A).** `_placeholder_label` is no longer the
+  default path. Unlabeled records are excluded server-side
+  (`labeled_only=true` on Module 1's export), hitting one without the
+  explicit `--allow-placeholder-labels` flag raises `UnlabeledDataError`
+  naming the hospital, and every loader now returns a `LabelProvenance`
+  alongside the data. Runs that do use placeholders print a warning
+  banner before any accuracy number and are stamped `NON-CLINICAL` in the
+  round report sent to Module 7.
+- **The UCI seed covers only 3 of 8 features.** Cleveland supplies
+  `age`, `trestbps` and `thalach` and nothing that maps to diastolic BP,
+  height, weight, or medication load; those five slots are fixed
+  constants pinned to the normalization mean so they contribute exactly
+  zero. Quote results as "3 real vitals features from Cleveland", never
+  as "UCI Heart Disease accuracy". Closing that gap means adding real
+  clinical columns to the vitals schema, which changes `N_FEATURES` and
+  therefore Module 5/6 too — deliberately out of Sprint A's scope. Note
+  also that `thalach` is exercise *maximum* heart rate, not a resting
+  vital.
+- **Single runs of the comparison are not results.** A ~47-record global
+  holdout means one patient moves accuracy by two points, and the sign of
+  the federated-vs-solo delta changes between seeds. Over 20 seeds
+  federation wins 17 and averages +0.077 — report the mean, the spread
+  and the win rate together, via `compare_uci_heart.py --sweep 20`.
 - `server.py`/`client_runner.py` (the real networked path) are now
   implemented and verified — via `run_local_smoke_test.sh` and
   `test_client_runner_matches_simulation.py` — to reach the same result

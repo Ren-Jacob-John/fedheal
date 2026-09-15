@@ -28,7 +28,20 @@ import models
 from database import engine, get_db, Base
 from docs_theme import mount_custom_docs
 
-Base.metadata.create_all(bind=engine)
+# Sprint A: schema management is moving to Alembic (see migrations/ and
+# module1-auth.md). This is the transitional state — create_all still runs
+# by default so nobody's local dev breaks mid-sprint, but it can now be
+# turned off, which is what staging/prod should do once migrations are
+# applied there.
+#
+# Sprint B removes this block entirely and makes `alembic upgrade head` the
+# only way tables come into existence. Leaving both mechanisms live
+# permanently would be worse than either alone: create_all would silently
+# create any table a forgotten migration missed, and the schema Alembic
+# thinks is deployed would drift from the one actually deployed.
+AUTO_CREATE_TABLES = os.environ.get("FEDHEAL_AUTO_CREATE_TABLES", "true").lower() == "true"
+if AUTO_CREATE_TABLES:
+    Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="FedHeal Auth Service", version="0.1.0", docs_url=None)
 mount_custom_docs(app, accent="#5b7cfa", accent_soft="#dfe7ff")  # blue — Module 1
@@ -103,16 +116,26 @@ MIN_RECORDS_FOR_TRAINING = 10
 
 class HospitalCreate(BaseModel):
     name: str
+    # Sprint A: declare up front whether this hospital supplies real
+    # clinical outcome labels. See models.Hospital.requires_label.
+    requires_label: bool = False
 
 
 class HospitalStatusUpdate(BaseModel):
-    is_active: bool
+    """
+    Both fields optional so PATCH can change either independently —
+    Module 7's existing set_hospital_status() sends {"is_active": ...}
+    and keeps working untouched.
+    """
+    is_active: Optional[bool] = None
+    requires_label: Optional[bool] = None
 
 
 class HospitalOut(BaseModel):
     id: str
     name: str
     is_active: bool
+    requires_label: bool
 
     class Config:
         from_attributes = True
@@ -156,6 +179,14 @@ class VitalsUploadResponse(BaseModel):
     rejected: int
     stored: int
     results: list[dict]
+    # Sprint A: how many of the stored records carry a real label, and
+    # whether this hospital was held to the requirement. Surfaced in the
+    # response (not just buried in the DB) so the uploader finds out at
+    # upload time that their export dropped the label column — rather
+    # than at training time, three days later, in someone else's logs.
+    label_required: bool = False
+    stored_labeled: int = 0
+    stored_unlabeled: int = 0
 
 
 class StoredVitalsOut(BaseModel):
@@ -170,6 +201,7 @@ class StoredVitalsOut(BaseModel):
     medication_count: int
     medication_mg_total: float
     label: Optional[int]
+    label_source: str
     validation_status: str
 
     class Config:
@@ -218,7 +250,7 @@ def create_hospital(payload: HospitalCreate, db: Session = Depends(get_db)):
     existing = db.query(models.Hospital).filter(models.Hospital.name == payload.name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Hospital already exists")
-    hospital = models.Hospital(name=payload.name)
+    hospital = models.Hospital(name=payload.name, requires_label=payload.requires_label)
     db.add(hospital)
     db.commit()
     db.refresh(hospital)
@@ -243,7 +275,15 @@ def set_hospital_status(
     hospital = db.query(models.Hospital).filter(models.Hospital.id == hospital_id).first()
     if not hospital:
         raise HTTPException(status_code=404, detail="Hospital not found")
-    hospital.is_active = payload.is_active
+    if payload.is_active is None and payload.requires_label is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least one of 'is_active' or 'requires_label'",
+        )
+    if payload.is_active is not None:
+        hospital.is_active = payload.is_active
+    if payload.requires_label is not None:
+        hospital.requires_label = payload.requires_label
     db.commit()
     db.refresh(hospital)
     return hospital
@@ -319,20 +359,52 @@ def read_me(current_user: models.User = Depends(get_current_user)):
 # Module 2, not reimplementing its rules) -> passed/flagged records land
 # in this hospital's own VitalsRecord rows -> Module 3 can train on them.
 
+def _require_upload_hospital(db: Session, current_user: models.User) -> models.Hospital:
+    """
+    Every upload path needs the caller's hospital ROW, not just its id —
+    requires_label lives there. Resolved from the JWT's hospital_id like
+    everything else here; never from the request body.
+    """
+    if not current_user.hospital_id:
+        raise HTTPException(status_code=400, detail="Only hospital-scoped users can upload vitals")
+    hospital = (
+        db.query(models.Hospital)
+        .filter(models.Hospital.id == current_user.hospital_id)
+        .first()
+    )
+    if not hospital:
+        raise HTTPException(status_code=404, detail="Hospital not found")
+    return hospital
+
+
+def _label_source(label) -> str:
+    """
+    Sprint A: record where the label came from at the moment it's stored.
+    Only "hospital" or "missing" — see models.VitalsRecord.label_source for
+    why there is no "placeholder" value here.
+    """
+    return "hospital" if label is not None else "missing"
+
+
 @app.post("/vitals/upload", response_model=VitalsUploadResponse)
 async def upload_vitals(
     payload: VitalsUploadRequest,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    if not current_user.hospital_id:
-        raise HTTPException(status_code=400, detail="Only hospital-scoped users can upload vitals")
+    hospital = _require_upload_hospital(db, current_user)
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 f"{VALIDATION_API_URL}/validate/vitals",
-                json={"records": payload.records, "hospital_id": current_user.hospital_id},
+                json={
+                    "records": payload.records,
+                    "hospital_id": current_user.hospital_id,
+                    # Module 2 owns the rule; Module 1 owns the tenant
+                    # setting that decides whether it applies.
+                    "require_label": hospital.requires_label,
+                },
             )
         resp.raise_for_status()
     except httpx.HTTPError as e:
@@ -344,6 +416,7 @@ async def upload_vitals(
     # order Module 2 received them in) so we know exactly which raw dict to
     # store for each "passed"/"flagged" result.
     stored = 0
+    stored_labeled = 0
     for raw, result in zip(payload.records, validation["results"]):
         if result["status"] not in ("passed", "flagged"):
             continue
@@ -359,10 +432,13 @@ async def upload_vitals(
             medication_count=raw.get("medication_count", 0),
             medication_mg_total=raw.get("medication_mg_total", 0),
             label=raw.get("label"),
+            label_source=_label_source(raw.get("label")),
             validation_status=result["status"],
         )
         db.add(record)
         stored += 1
+        if record.label is not None:
+            stored_labeled += 1
     db.commit()
 
     return VitalsUploadResponse(
@@ -372,6 +448,9 @@ async def upload_vitals(
         rejected=validation["rejected"],
         stored=stored,
         results=validation["results"],
+        label_required=hospital.requires_label,
+        stored_labeled=stored_labeled,
+        stored_unlabeled=stored - stored_labeled,
     )
 
 
@@ -387,8 +466,7 @@ async def upload_vitals_csv(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    if not current_user.hospital_id:
-        raise HTTPException(status_code=400, detail="Only hospital-scoped users can upload vitals")
+    hospital = _require_upload_hospital(db, current_user)
 
     raw_bytes = await file.read()
     try:
@@ -396,7 +474,10 @@ async def upload_vitals_csv(
             resp = await client.post(
                 f"{VALIDATION_API_URL}/validate/vitals/csv",
                 files={"file": (file.filename, raw_bytes, "text/csv")},
-                data={"hospital_id": current_user.hospital_id},
+                data={
+                    "hospital_id": current_user.hospital_id,
+                    "require_label": str(hospital.requires_label).lower(),
+                },
             )
         resp.raise_for_status()
     except httpx.HTTPError as e:
@@ -412,6 +493,7 @@ async def upload_vitals_csv(
     raw_rows = list(reader)
 
     stored = 0
+    stored_labeled = 0
     for raw, result in zip(raw_rows, validation["results"]):
         if result["status"] not in ("passed", "flagged"):
             continue
@@ -421,6 +503,7 @@ async def upload_vitals_csv(
                 return None
             return cast(v)
 
+        _csv_label = _num(raw.get("label"), int)
         record = models.VitalsRecord(
             hospital_id=current_user.hospital_id,
             patient_ref=result["patient_ref"] or raw.get("patient_ref", ""),
@@ -432,11 +515,14 @@ async def upload_vitals_csv(
             heart_rate_bpm=_num(raw.get("heart_rate_bpm"), float),
             medication_count=int(_num(raw.get("medication_count"), float) or 0),
             medication_mg_total=_num(raw.get("medication_mg_total"), float) or 0,
-            label=_num(raw.get("label"), int),
+            label=_csv_label,
+            label_source=_label_source(_csv_label),
             validation_status=result["status"],
         )
         db.add(record)
         stored += 1
+        if _csv_label is not None:
+            stored_labeled += 1
     db.commit()
 
     return VitalsUploadResponse(
@@ -446,6 +532,9 @@ async def upload_vitals_csv(
         rejected=validation["rejected"],
         stored=stored,
         results=validation["results"],
+        label_required=hospital.requires_label,
+        stored_labeled=stored_labeled,
+        stored_unlabeled=stored - stored_labeled,
     )
 
 
@@ -518,12 +607,28 @@ def review_flagged_vitals(
 def export_vitals(
     hospital_id: str,
     include_flagged: bool = False,
+    labeled_only: bool = True,
     db: Session = Depends(get_db),
     _=Depends(auth.require_module3_service_key),
 ):
+    """
+    BREAKING DEFAULT CHANGE (Sprint A): `labeled_only` defaults to **True**.
+
+    Before, this returned unlabeled records too, and Module 3 quietly
+    substituted a rule-based placeholder label for each one — meaning the
+    default end-to-end path trained partly on labels no clinician ever
+    produced. That default is now inverted: unlabeled records are excluded
+    here unless a caller explicitly asks for them.
+
+    Pass labeled_only=false to get the old behaviour. Module 3's
+    real_data.py only does that when its own --allow-placeholder-labels
+    flag is set, and it prints a loud banner when it happens.
+    """
     query = db.query(models.VitalsRecord).filter(models.VitalsRecord.hospital_id == hospital_id)
     if not include_flagged:
         query = query.filter(models.VitalsRecord.validation_status == "passed")
+    if labeled_only:
+        query = query.filter(models.VitalsRecord.label.isnot(None))
     return query.all()
 
 
@@ -541,14 +646,43 @@ def _hospital_training_status(db: Session, hospital_id: str) -> dict:
         .scalar()
         or 0
     )
+    # Sprint A: "how many records" stopped being the useful number once
+    # unlabeled records were excluded from training by default. A hospital
+    # can sit on 500 records and still be untrainable if none carry a real
+    # outcome, and the old status field would have cheerfully reported
+    # "ready_for_training" the whole time.
+    labeled_count = (
+        db.query(func.count(models.VitalsRecord.id))
+        .filter(
+            models.VitalsRecord.hospital_id == hospital_id,
+            models.VitalsRecord.label.isnot(None),
+        )
+        .scalar()
+        or 0
+    )
     last_upload = (
         db.query(func.max(models.VitalsRecord.uploaded_at))
         .filter(models.VitalsRecord.hospital_id == hospital_id)
         .scalar()
     )
+    hospital = db.query(models.Hospital).filter(models.Hospital.id == hospital_id).first()
+
+    if labeled_count >= MIN_RECORDS_FOR_TRAINING:
+        status_value = "ready_for_training"
+    elif count >= MIN_RECORDS_FOR_TRAINING:
+        # Enough data, not enough labels — a distinct, actionable state, and
+        # the one most likely to bite a hospital mid-demo.
+        status_value = "awaiting_labels"
+    else:
+        status_value = "collecting_data"
+
     return {
         "records_available": count,
-        "status": "ready_for_training" if count >= MIN_RECORDS_FOR_TRAINING else "collecting_data",
+        "labeled_records": labeled_count,
+        "unlabeled_records": count - labeled_count,
+        "label_coverage": round(labeled_count / count, 4) if count else 0.0,
+        "requires_label": bool(hospital.requires_label) if hospital else False,
+        "status": status_value,
         "last_upload": last_upload.isoformat() if last_upload else None,
     }
 

@@ -81,6 +81,23 @@ the results.
   If Module 7 is unreachable, validation still completes normally; the
   report is simply skipped.
 
+## Required-label check (new in Sprint A)
+
+`rules.check_required_label` is a sixth gate that runs **only** when the
+caller passes `require_label=true` (a field on `POST /validate/vitals`,
+a form field on `POST /validate/vitals/csv`). Module 1 sets it from that
+hospital's `requires_label` setting.
+
+The rule lives here, with all the other validation rules, so Module 1
+never grows a second drifting copy of validation logic. The *tenant
+configuration* that decides whether it applies lives in Module 1, because
+this service has no concept of tenants beyond an id to attribute flags to.
+
+It **rejects** rather than flags. A flagged record is still stored and
+still reachable by training after human review; an unlabeled record from
+a hospital that promised labels indicates a broken export, not a
+borderline measurement.
+
 ## Known limitations / current status
 
 - Fully functional, no known gaps in the pipeline logic itself.

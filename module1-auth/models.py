@@ -30,6 +30,19 @@ class Hospital(Base):
     name = Column(String, unique=True, nullable=False)
     is_active = Column(Boolean, default=True)
 
+    # Sprint A: does this hospital have real clinical outcome labels to
+    # supply? When True, uploads missing a `label` are REJECTED (Module 2's
+    # rules.check_required_label) instead of stored unlabeled and later
+    # placeholder-labeled at training time.
+    #
+    # Defaults False, which preserves the pre-Sprint-A behaviour for every
+    # existing tenant — this is an explicit per-hospital declaration
+    # ("we have outcomes, hold us to them"), not something to infer from
+    # whether labels happen to show up in an upload. Inferring it would make
+    # the rule silently switch itself off the first time a hospital's export
+    # broke, which is the exact failure this is meant to catch.
+    requires_label = Column(Boolean, nullable=False, default=False)
+
     users = relationship("User", back_populates="hospital")
 
 
@@ -82,6 +95,19 @@ class VitalsRecord(Base):
     # real_data.py docstring for how the loader handles records that don't
     # have one yet.
     label = Column(Integer, nullable=True)
+
+    # Sprint A: where that label came from. Only ever one of:
+    #   "hospital" — a real clinical outcome the hospital uploaded.
+    #   "missing"  — no label supplied (only possible when the hospital is
+    #                NOT configured with requires_label).
+    #
+    # There is deliberately no "placeholder" value. Module 3's rule-based
+    # placeholder label is computed at training time and never written
+    # back here, so this column can't ever assert that a made-up label is
+    # a clinical fact. A record that reads label=1/label_source="hospital"
+    # means a clinician's system said so, full stop — which is what makes
+    # this column worth having at all.
+    label_source = Column(String, nullable=False, default="missing")
 
     validation_status = Column(String, nullable=False, default="passed")  # "passed" | "flagged"
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
