@@ -19,6 +19,9 @@ export default function TopHUD({ me, overview, view, onSetView, onLogout, onRefr
         <button className={view === "system" ? "is-active" : ""} onClick={() => onSetView("system")}>
           Architecture
         </button>
+        <button className={view === "synthesis" ? "is-active" : ""} onClick={() => onSetView("synthesis")}>
+          Synthesis
+        </button>
       </nav>
 
       {overview && (

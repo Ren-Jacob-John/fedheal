@@ -75,18 +75,20 @@ uvicorn main:app --reload --port 8001
 
 Interactive API docs: `http://localhost:8001/docs`
 
-### Database schema — Alembic (new in Sprint A)
+### Database schema — Alembic (Sprint A set up, Sprint B finished)
 
-Schema changes are moving from `Base.metadata.create_all()` to Alembic
-migrations. Sprint A set this up; Sprint B finishes the move and removes
-`create_all` entirely.
+Schema changes moved from `Base.metadata.create_all()` to Alembic
+migrations. Sprint A set this up transitionally (both mechanisms live,
+gated by `FEDHEAL_AUTO_CREATE_TABLES`); **Sprint B removes `create_all`
+and that variable entirely** — `alembic upgrade head` is now the only way
+tables come into existence, in every environment, local dev included.
 
 ```bash
 # FRESH database (nothing there yet):
 alembic upgrade head
 
 # EXISTING database that create_all already built (every local SQLite
-# file and the current Supabase project): tell Alembic it's already at
+# file and the pre-Sprint-B Supabase project): tell Alembic it's already at
 # the baseline, THEN apply the new migrations.
 alembic stamp 0001_baseline
 alembic upgrade head
@@ -109,9 +111,12 @@ tables leaves Alembic believing they exist, and the baseline migration
 will then be skipped forever. `sqlite3 fedmed_auth.db ".tables"` or `\dt`
 in psql first.
 
-Set `FEDHEAL_AUTO_CREATE_TABLES=false` once migrations are applied to an
-environment, so `create_all` stops running alongside Alembic and the two
-can't drift.
+**Every environment now needs its migrations applied before `uvicorn
+main:app` is started against it** — there is no more `create_all` safety
+net. Staging: `alembic stamp 0001_baseline && alembic upgrade head`
+against the staging `FEDHEAL_DATABASE_URL` (staging was built by
+`create_all` too, same as every local SQLite file) — see the Sprint B
+deployment checklist in `docs/DEVELOPMENT_PLAN.md` section 7.
 
 **Required environment variables** (see `.env.example` for the full,
 commented list):
@@ -125,8 +130,10 @@ commented list):
 - `FEDHEAL_DASHBOARD_ORIGIN` — comma-separated list of allowed CORS
   origins (the dashboard's actual URL(s)).
 - `FEDHEAL_COOKIE_SECURE` — set `true` once served over HTTPS.
-- `FEDHEAL_AUTO_CREATE_TABLES` — defaults `true`. Set `false` in any
-  environment managed by Alembic (see above).
+
+`GET /health` returns `{"status": "ok"}` — added in Sprint B so every
+module now has the same deployment health-check shape (Modules 2 and 7
+already had one).
 
 ## How it depends on / is depended on by other modules
 
@@ -177,7 +184,15 @@ on 500 unlabeled records used to report `ready_for_training`.
   `test_client_runner_matches_simulation.py` exercises its data path, and
   `module3-fedlearning/seed_uci_heart.py` is an end-to-end exercise of
   the upload -> validate -> store path (dedicated unit tests are Sprint C).
-- `create_all` and Alembic are both live during this transitional sprint.
-  That is deliberate but temporary — Sprint B removes `create_all`.
-- No `/health` endpoint (Modules 2 and 7 have one; this module doesn't
-  yet) — worth adding for deployment health checks.
+- ~~`create_all` and Alembic both live during this transitional sprint~~ —
+  **resolved in Sprint B**: `create_all` and `FEDHEAL_AUTO_CREATE_TABLES`
+  are gone, `alembic upgrade head` is the only schema path now.
+- ~~No `/health` endpoint~~ — **resolved in Sprint B**: added, same shape
+  as Modules 2 and 7.
+- Cross-machine verification of the real networked FL path
+  (`client_runner.py` from genuinely separate machines) is still a
+  stretch goal, not required for this sprint — see
+  `docs/DEVELOPMENT_PLAN.md` section 4, item 6. Everything verified so far
+  (`run_local_smoke_test.sh`, `test_client_runner_matches_simulation.py`)
+  is localhost/subprocess-based, which is sufficient evidence the path
+  itself is correct.

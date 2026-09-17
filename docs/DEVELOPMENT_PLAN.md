@@ -97,15 +97,30 @@ schedule slack the other weeks can borrow.
   `test_client_runner_matches_simulation.py`) is localhost/subprocess-
   based. If this doesn't fit, the localhost verification already done is
   sufficient evidence the path itself is correct — don't let this block
-  anything else. **TLS stays out of scope** — see section 4.
+  anything else. **TLS stays out of scope** — see section 4. *Status:
+  not attempted this sprint — genuinely needs a second machine/VM, not
+  something to fake from this environment. Still not a blocker, per the
+  note above.*
 - **Security & infra hardening, finish (P1):** Alembic migrations
-  complete and applied to the staging database.
+  complete and applied to the staging database. *Status: code-complete
+  — `create_all`/`FEDHEAL_AUTO_CREATE_TABLES` removed from
+  `module1-auth/main.py`, `/health` added, docs updated. Actually
+  running `alembic stamp 0001_baseline && alembic upgrade head` against
+  the real staging `FEDHEAL_DATABASE_URL` is an operator action against
+  live infra this environment doesn't have credentials for — the module
+  is ready for it, see module1-auth.md.*
 - **Frontend, start (P4):** build the Module 8 synthesis view (rendering
   a `SynthesisReport` — findings, disclaimer, stub markers — in the
   dashboard) and SHAP chart rendering, since SHAP is the one explainer
   that pairs with a genuinely real (non-stub) specialist today (the
   vitals/TabPFN path). **Grad-CAM heatmap UI is deferred** — see section
-  4; there's no real imaging output yet for it to visualize.
+  4; there's no real imaging output yet for it to visualize. *Status:
+  done — `module8-synthesis/main.py` (new HTTP service, scoped to
+  `heart_disease`/vitals per the risk-register note below) plus
+  `SynthesisView.jsx` and `ShapChart.jsx` in the dashboard. Runs
+  end-to-end against the vitals specialist actually installed (TabPFN if
+  available, XGBoost fallback per module5-modelzoo/registry.py) — real
+  SHAP contributions, not mocked data.*
 
 ### Sprint C — Sep 28 to Oct 4 (finish week 14, start week 15)
 

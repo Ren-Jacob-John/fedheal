@@ -9,6 +9,8 @@ export const AUTH_API_BASE =
   import.meta.env.VITE_AUTH_API_BASE || "http://localhost:8001";
 export const ADMIN_API_BASE =
   import.meta.env.VITE_ADMIN_API_BASE || "http://localhost:8005";
+export const SYNTHESIS_API_BASE =
+  import.meta.env.VITE_SYNTHESIS_API_BASE || "http://localhost:8006";
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -170,6 +172,28 @@ export const adminApi = {
       method: "PATCH",
       token,
       body: { is_active: isActive },
+    });
+  },
+};
+
+// ---------- Module 8 — Synthesis (Sprint B) ----------
+//
+// Deliberately one call for one condition right now: `heart_disease` is
+// the only condition whose specialist (vitals) is genuinely real end to
+// end today — see module8-synthesis.md's "HTTP surface" section. `features`
+// must be in tabular_vitals.FEATURE_NAMES order (age, resting_bp,
+// cholesterol, max_heart_rate, bmi, glucose, num_medications,
+// prior_admissions) — this is the model's own feature space, not Module
+// 1's stored upload schema (the two aren't reconciled yet, see
+// docs/DEVELOPMENT_PLAN.md's Sprint A risk register).
+export const synthesisApi = {
+  base: SYNTHESIS_API_BASE,
+
+  synthesizeHeartDisease(token, features) {
+    return request(SYNTHESIS_API_BASE, "/synthesize/heart_disease", {
+      method: "POST",
+      token,
+      body: { features },
     });
   },
 };

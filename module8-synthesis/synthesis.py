@@ -9,9 +9,9 @@ in short, this layer summarizes model evidence, it never issues a
 diagnosis, treatment plan, or drug/dosage recommendation.
 """
 import sys
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "module6-condition-router"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "module5-modelzoo"))
@@ -39,6 +39,12 @@ class FindingSummary:
     severity_weight: Optional[float] = None   # from module5's fusion table, if available
     explanation_summaries: list[str] = field(default_factory=list)
     unavailable_explainers: list[str] = field(default_factory=list)
+    # method -> that explainer's raw `Explanation.details` (e.g. SHAP's
+    # {feature_name: contribution} dict) — new in Sprint B. `to_markdown()`
+    # never reads this (the one-line summaries above are what a clinician
+    # reads), but the dashboard's SHAP chart needs the actual per-feature
+    # numbers, not just the top-3-features sentence built from them.
+    explanation_details: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -96,6 +102,16 @@ class SynthesisReport:
         lines.append(f"**Requires clinician review before any action:** {self.requires_clinician_review}")
         return "\n".join(lines)
 
+    def to_dict(self) -> dict[str, Any]:
+        """
+        JSON-serializable form — new in Sprint B, for the dashboard's
+        Module 8 synthesis view (module4-dashboard-react). `to_markdown()`
+        stays the clinician-readable/CLI form; this is the same data, one
+        shape flatter, so the frontend doesn't have to parse markdown to
+        render findings, stub badges, and the disclaimer as UI elements.
+        """
+        return asdict(self)
+
 
 def build_synthesis(
     condition_report: ConditionReport,
@@ -115,6 +131,7 @@ def build_synthesis(
 
     findings = []
     used_any_stub = False
+    urgent_flags = list(fused.urgent_review_flags) if fused else []
     for f in condition_report.findings:
         pred = f.prediction
         used_any_stub = used_any_stub or pred.is_stub
@@ -122,12 +139,14 @@ def build_synthesis(
         severity_weight = None
         urgent = pred.metadata.get("flag_for_urgent_review", False) if pred.metadata else False
 
-        explanation_summaries, unavailable = [], []
+        explanation_summaries, unavailable, explanation_details = [], [], {}
         for exp in f.explanations:
             if exp.is_stub:
                 unavailable.append(f"{exp.method}: {exp.summary}")
             else:
                 explanation_summaries.append(f"[{exp.method}] {exp.summary}")
+                if exp.details is not None:
+                    explanation_details[exp.method] = exp.details
 
         findings.append(FindingSummary(
             specialist_id=f.specialist_id,
@@ -138,11 +157,16 @@ def build_synthesis(
             severity_weight=severity_weight,
             explanation_summaries=explanation_summaries,
             unavailable_explainers=unavailable,
+            explanation_details=explanation_details,
         ))
         if urgent:
-            pass  # placeholder hook — urgent_review_flags populated below from fused, if present
-
-    urgent_flags = list(fused.urgent_review_flags) if fused else []
+            # Sprint B: closes the gap module8-synthesis.md flagged — a
+            # single finding's own metadata can now surface an urgent flag
+            # even with no Module 5 fusion step involved, instead of only
+            # ever coming from `fused.urgent_review_flags`.
+            urgent_flags.append(
+                f"{f.specialist_id} ({pred.model_name}) flagged for urgent review"
+            )
 
     return SynthesisReport(
         condition_queried=condition_report.condition,

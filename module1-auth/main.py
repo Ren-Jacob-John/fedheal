@@ -25,23 +25,18 @@ from sqlalchemy.orm import Session
 
 import auth
 import models
-from database import engine, get_db, Base
+from database import get_db
 from docs_theme import mount_custom_docs
 
-# Sprint A: schema management is moving to Alembic (see migrations/ and
-# module1-auth.md). This is the transitional state — create_all still runs
-# by default so nobody's local dev breaks mid-sprint, but it can now be
-# turned off, which is what staging/prod should do once migrations are
-# applied there.
-#
-# Sprint B removes this block entirely and makes `alembic upgrade head` the
-# only way tables come into existence. Leaving both mechanisms live
-# permanently would be worse than either alone: create_all would silently
-# create any table a forgotten migration missed, and the schema Alembic
-# thinks is deployed would drift from the one actually deployed.
-AUTO_CREATE_TABLES = os.environ.get("FEDHEAL_AUTO_CREATE_TABLES", "true").lower() == "true"
-if AUTO_CREATE_TABLES:
-    Base.metadata.create_all(bind=engine)
+# Sprint A introduced Alembic (see migrations/ and module1-auth.md) but kept
+# Base.metadata.create_all() running alongside it as a transitional safety
+# net. Sprint B retires create_all entirely: `alembic upgrade head` is now
+# the only way tables come into existence, in every environment including
+# local dev. Running both permanently would be worse than either alone —
+# create_all would silently create any table a forgotten migration missed,
+# and the schema Alembic thinks is deployed would drift from the one
+# actually deployed. See module1-auth.md's "Database schema" section for
+# the one-time `alembic stamp` step existing databases need.
 
 app = FastAPI(title="FedHeal Auth Service", version="0.1.0", docs_url=None)
 mount_custom_docs(app, accent="#5b7cfa", accent_soft="#dfe7ff")  # blue — Module 1
@@ -241,6 +236,11 @@ def require_role(*allowed_roles: models.Role):
             raise HTTPException(status_code=403, detail="Not permitted for this role")
         return user
     return checker
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 # ---------- Hospital onboarding (super-admin only in practice) ----------

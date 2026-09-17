@@ -6,6 +6,7 @@ import FederationMap from "./components/FederationMap.jsx";
 import RoundsRail from "./components/RoundsRail.jsx";
 import DetailDrawer from "./components/DetailDrawer.jsx";
 import SystemMap from "./components/SystemMap.jsx";
+import SynthesisView from "./components/SynthesisView.jsx";
 
 const POLL_MS = 12000;
 
@@ -239,24 +240,28 @@ export default function App() {
             />
           )}
         </>
-      ) : (
+      ) : view === "system" ? (
         <SystemMap />
+      ) : (
+        <SynthesisView token={token} />
       )}
 
-      <DetailDrawer
-        selection={selection}
-        onClose={() => setSelection(null)}
-        me={me}
-        token={token}
-        hospital={selectedHospital}
-        overview={overview}
-        rounds={rounds}
-        flags={selection && selection !== "core" ? flagsByHospital[selection] : null}
-        onTriggerRound={handleTriggerRound}
-        triggering={triggering}
-        onUploaded={() => loadAll(token, me.role, { silent: true })}
-        onSetHospitalActive={handleSetHospitalActive}
-      />
+      {view === "map" && (
+        <DetailDrawer
+          selection={selection}
+          onClose={() => setSelection(null)}
+          me={me}
+          token={token}
+          hospital={selectedHospital}
+          overview={overview}
+          rounds={rounds}
+          flags={selection && selection !== "core" ? flagsByHospital[selection] : null}
+          onTriggerRound={handleTriggerRound}
+          triggering={triggering}
+          onUploaded={() => loadAll(token, me.role, { silent: true })}
+          onSetHospitalActive={handleSetHospitalActive}
+        />
+      )}
 
       {loadError && <div className="toast toast--error">{loadError}</div>}
     </div>
