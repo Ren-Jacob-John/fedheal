@@ -56,8 +56,7 @@ from sklearn.model_selection import train_test_split
 logger = logging.getLogger(__name__)
 
 AUTH_API_URL = os.environ.get("FEDHEAL_AUTH_API_URL", "http://localhost:8001")
-SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M1", "dev-only-key-module3-to-module1")
-
+SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M1", "iamgodofthunder")
 FEATURE_KEYS = [
     "age_years", "systolic_bp", "diastolic_bp", "heart_rate_bpm",
     "weight_kg", "height_cm", "medication_count", "medication_mg_total",

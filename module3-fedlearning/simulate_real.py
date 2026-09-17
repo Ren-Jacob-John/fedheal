@@ -43,7 +43,7 @@ MIN_RECORDS = 10
 N_ROUNDS = 8
 
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
-ADMIN_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M7", "dev-only-key-module3-to-module7")
+ADMIN_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M7", "iamgodofdeath")
 
 
 def parse_args() -> argparse.Namespace:

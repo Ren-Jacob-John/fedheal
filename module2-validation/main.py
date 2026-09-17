@@ -47,7 +47,7 @@ mount_custom_docs(app, accent="#1f9d63", accent_soft="#dcf5e8")  # green — Mod
 # reason string, never a raw record, matching the "operator can see flags,
 # never patient data" design.
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
-ADMIN_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M2_M7", "dev-only-key-module2-to-module7")
+ADMIN_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M2_M7", "iammightythor")
 
 
 def report_flags_to_admin(hospital_id: str | None, results: list["ValidationResult"]) -> None:
