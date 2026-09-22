@@ -137,10 +137,39 @@ class HospitalOut(BaseModel):
 
 
 class UserRegister(BaseModel):
+    """
+    Public self-service registration (POST /register — no auth required).
+
+    There is deliberately no `role` field here. Every account created
+    through this endpoint is a CLINICIAN, full stop — pydantic silently
+    drops any field a client sends that isn't declared on this model, so
+    a spoofed `"role": "super_admin"` in the request body has no effect
+    on what gets written to the database. Elevated accounts (hospital
+    admins, other super admins) are only ever created through the
+    SUPER_ADMIN-gated POST /admin/users below.
+    """
     email: str
     password: str
     hospital_id: str
-    role: models.Role = models.Role.CLINICIAN
+
+
+class AdminUserCreate(BaseModel):
+    """
+    Used only by POST /admin/users, which is itself gated to an
+    authenticated SUPER_ADMIN by require_role() below — the same
+    dependency every other role-restricted endpoint in this module
+    uses. `role` is safe to accept here specifically *because* the
+    caller has already proven they're a SUPER_ADMIN before this model
+    is even parsed; that's what makes this different from the public
+    UserRegister schema above, which never exposes it.
+    """
+    email: str
+    password: str
+    role: models.Role
+    # Optional: a new SUPER_ADMIN isn't tied to one hospital (mirrors
+    # models.User.hospital_id, which is nullable for the same reason).
+    # A new HOSPITAL_ADMIN must supply one — enforced in the endpoint.
+    hospital_id: Optional[str] = None
 
 
 class UserOut(BaseModel):
@@ -300,11 +329,61 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
     if not hospital:
         raise HTTPException(status_code=404, detail="Hospital not found")
 
+    # Public registration always creates a CLINICIAN. This is hard-coded,
+    # not read from `payload` — UserRegister has no role field, and even
+    # if a caller sends one in the raw JSON body it's silently ignored,
+    # never reaching this line.
+    user = models.User(
+        email=payload.email,
+        hashed_password=auth.hash_password(payload.password),
+        role=models.Role.CLINICIAN,
+        hospital_id=payload.hospital_id,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+# ---------- Administrator creation (SUPER_ADMIN only) ----------
+# The only path by which a HOSPITAL_ADMIN or SUPER_ADMIN account can come
+# into existence. Gated by require_role(SUPER_ADMIN) — the exact same
+# dependency /hospitals/{id} PATCH already uses, not a parallel
+# reimplementation of the role check — so the privilege check happens
+# before this function body ever runs, which is what makes it safe to
+# also permit role=SUPER_ADMIN here.
+
+@app.post("/admin/users", response_model=UserOut)
+def create_admin_user(
+    payload: AdminUserCreate,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(require_role(models.Role.SUPER_ADMIN)),
+):
+    if payload.role not in (models.Role.HOSPITAL_ADMIN, models.Role.SUPER_ADMIN):
+        raise HTTPException(
+            status_code=400,
+            detail="Use POST /register for clinician accounts; this endpoint creates administrators only",
+        )
+
+    if db.query(models.User).filter(models.User.email == payload.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    hospital_id = payload.hospital_id
+    if payload.role == models.Role.HOSPITAL_ADMIN:
+        if not hospital_id:
+            raise HTTPException(status_code=400, detail="hospital_id is required for a hospital_admin")
+        hospital = db.query(models.Hospital).filter(models.Hospital.id == hospital_id).first()
+        if not hospital:
+            raise HTTPException(status_code=404, detail="Hospital not found")
+    # SUPER_ADMIN mirrors models.User.hospital_id: nullable, since a
+    # platform-level admin isn't scoped to one tenant. If one is supplied
+    # anyway it's kept as-is rather than silently dropped.
+
     user = models.User(
         email=payload.email,
         hashed_password=auth.hash_password(payload.password),
         role=payload.role,
-        hospital_id=payload.hospital_id,
+        hospital_id=hospital_id,
     )
     db.add(user)
     db.commit()
