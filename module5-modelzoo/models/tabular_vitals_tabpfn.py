@@ -35,9 +35,10 @@ import numpy as np
 
 from base import PredictionResult, SpecialistModel
 
+# Same contract as tabular_vitals.FEATURE_NAMES — Module 1's stored fields.
 FEATURE_NAMES = [
-    "age", "resting_bp", "cholesterol", "max_heart_rate",
-    "bmi", "glucose", "num_medications", "prior_admissions",
+    "age_years", "systolic_bp", "diastolic_bp", "heart_rate_bpm",
+    "weight_kg", "height_cm", "medication_count", "medication_mg_total",
 ]
 
 
@@ -45,6 +46,8 @@ class TabPFNVitalsModel(SpecialistModel):
     name = "tabpfn-v2-vitals-v1"
     modality = "vitals"
     task = "classification"
+    feature_names = FEATURE_NAMES
+    training_status = "untrained"
 
     def __init__(self):
         if not TABPFN_AVAILABLE:
@@ -57,15 +60,21 @@ class TabPFNVitalsModel(SpecialistModel):
         self._is_fitted = False
 
     def is_available(self) -> bool:
-        return TABPFN_AVAILABLE
+        return TABPFN_AVAILABLE and self._is_fitted
 
-    def fit(self, X: np.ndarray, y: np.ndarray):
+    def fit(self, X: np.ndarray, y: np.ndarray, *, training_status: str = "demo_fit",
+            model_version: str | None = None, is_fallback: bool | None = None):
         # TabPFN's "fit" just stores the local table for in-context
         # inference — this is still the right call site for the
         # FedHeal pipeline (Module 4's local-training step), it just
         # doesn't do gradient-based training under the hood.
         self.model.fit(X, y)
         self._is_fitted = True
+        self.training_status = training_status
+        if model_version is not None:
+            self.model_version = model_version
+        if is_fallback is not None:
+            self.is_fallback = is_fallback
         return self
 
     def predict(self, case: dict) -> PredictionResult:
@@ -91,4 +100,5 @@ class TabPFNVitalsModel(SpecialistModel):
             confidence=confidence,
             raw_output=proba.tolist(),
             explanation=None,  # wire in SHAP KernelExplainer here
+            **self.provenance(),
         )

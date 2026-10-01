@@ -170,8 +170,9 @@ the through-the-stack number are the same math, not two implementations
 that happen to agree.
 
 **Key environment variables** (read via `real_data.py` / `simulate_real.py`):
-match Module 1's `FEDHEAL_SVC_KEY_M3_M1` and the URL Module 1 is
-reachable at.
+the credential for Module 1 must be a hospital-scoped token (`FEDHEAL_SVC_TOKEN_M3_M1`, hospital client)
+or the operator signing key (`FEDHEAL_SVC_SIGNING_KEY_M3_M1`, must equal
+Module 1's) — plus the URL Module 1 is reachable at.
 
 ## How it depends on / is depended on by other modules
 

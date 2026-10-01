@@ -1,19 +1,20 @@
-// Renders one specialist's SHAP contributions — module8-synthesis's
-// `explanation_details.shap` dict, `{feature_name: contribution}` — as a
-// diverging bar chart: bars grow left (pushed the prediction toward the
-// OTHER class) or right (pushed toward the predicted class) from a
+// Renders one specialist's SHAP contributions — `{feature_name: contribution}` —
+// as a diverging bar chart. The contributions are log-odds toward the
+// model's POSITIVE class (high_risk), whichever class was predicted: bars
+// grow right (toward the positive class) or left (away from it) from a
 // center zero line. No chart library in this project (see package.json)
 // and none needed for one dimension of data — plain SVG.
 
+// Display names for Module 1's stored fields — the model's actual inputs.
 const HUMAN_FEATURE_NAMES = {
-  age: "Age",
-  resting_bp: "Resting BP",
-  cholesterol: "Cholesterol",
-  max_heart_rate: "Max heart rate",
-  bmi: "BMI",
-  glucose: "Glucose",
-  num_medications: "Medications",
-  prior_admissions: "Prior admissions",
+  age_years: "Age (years)",
+  systolic_bp: "Systolic BP",
+  diastolic_bp: "Diastolic BP",
+  heart_rate_bpm: "Heart rate",
+  weight_kg: "Weight (kg)",
+  height_cm: "Height (cm)",
+  medication_count: "Medications",
+  medication_mg_total: "Medication mg",
 };
 
 const WIDTH = 420;
@@ -22,7 +23,7 @@ const ROW_GAP = 6;
 const LABEL_W = 118;
 const PAD = 8;
 
-export default function ShapChart({ contributions, predictedLabel }) {
+export default function ShapChart({ contributions, positiveLabel }) {
   const entries = Object.entries(contributions || {}).sort(
     (a, b) => Math.abs(b[1]) - Math.abs(a[1])
   );
@@ -36,8 +37,8 @@ export default function ShapChart({ contributions, predictedLabel }) {
   return (
     <figure className="shap-chart">
       <figcaption className="shap-chart__caption">
-        SHAP contributions toward{" "}
-        <strong>{predictedLabel ?? "this prediction"}</strong> — this case only,
+        SHAP contributions toward the positive class{" "}
+        <strong>({positiveLabel ?? "high_risk"})</strong> — this record only,
         not a general feature-importance ranking.
       </figcaption>
       <svg

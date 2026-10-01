@@ -26,8 +26,11 @@ Prerequisites
 -------------
   1. Module 1 (auth/vitals) running on :8001
   2. Module 2 (validation) running on :8002
-  3. Nothing else. Hospitals and their admin users are created by this
-     script if they don't already exist.
+  3. A super_admin account (hospital creation is SUPER_ADMIN-only): create
+     it with module1-auth/create_super_admin.py, then export
+     FEDHEAL_SEED_SUPER_ADMIN_EMAIL / FEDHEAL_SEED_SUPER_ADMIN_PASSWORD.
+     Hospitals and their users are created by this script if they don't
+     already exist.
 
 Every seeded hospital is created with `requires_label=true`, since every
 Cleveland record carries a real outcome. That means Module 2 will reject
@@ -43,6 +46,7 @@ whose patient_ref carries this script's prefix).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 import httpx
@@ -126,9 +130,28 @@ def split_records(records: list[dict], n_hospitals: int, non_iid: bool,
     return [[records[i] for i in sorted(bucket)] for bucket in buckets]
 
 
-def ensure_hospital(client: httpx.Client, auth_url: str, name: str) -> dict:
+def super_admin_headers(client: httpx.Client, auth_url: str) -> dict:
+    """
+    Hospital creation/patching is SUPER_ADMIN-only. Credentials come from
+    the environment (never a CLI flag, which would land in shell history):
+    FEDHEAL_SEED_SUPER_ADMIN_EMAIL / FEDHEAL_SEED_SUPER_ADMIN_PASSWORD.
+    Create the first super_admin with module1-auth/create_super_admin.py.
+    """
+    email = os.environ.get("FEDHEAL_SEED_SUPER_ADMIN_EMAIL")
+    password = os.environ.get("FEDHEAL_SEED_SUPER_ADMIN_PASSWORD")
+    if not email or not password:
+        raise SystemExit(
+            "Set FEDHEAL_SEED_SUPER_ADMIN_EMAIL and FEDHEAL_SEED_SUPER_ADMIN_PASSWORD "
+            "(a super_admin account; see module1-auth/create_super_admin.py)."
+        )
+    login = client.post(f"{auth_url}/token", timeout=10.0, data={"username": email, "password": password})
+    login.raise_for_status()
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def ensure_hospital(client: httpx.Client, auth_url: str, name: str, headers: dict) -> dict:
     """Create the hospital if absent; return its record either way."""
-    resp = client.get(f"{auth_url}/hospitals", timeout=10.0)
+    resp = client.get(f"{auth_url}/hospitals", timeout=10.0, headers=headers)
     resp.raise_for_status()
     for h in resp.json():
         if h["name"] == name:
@@ -136,11 +159,11 @@ def ensure_hospital(client: httpx.Client, auth_url: str, name: str) -> dict:
             # it was created before Sprint A or by an earlier run.
             if not h.get("requires_label"):
                 client.patch(f"{auth_url}/hospitals/{h['id']}",
-                             json={"requires_label": True}, timeout=10.0)
+                             json={"requires_label": True}, timeout=10.0, headers=headers)
                 h["requires_label"] = True
             return h
 
-    resp = client.post(f"{auth_url}/hospitals", timeout=10.0,
+    resp = client.post(f"{auth_url}/hospitals", timeout=10.0, headers=headers,
                        json={"name": name, "requires_label": True})
     resp.raise_for_status()
     return resp.json()
@@ -240,10 +263,15 @@ def main() -> int:
     total_stored = 0
     total_rejected = 0
     with httpx.Client() as client:
+        try:
+            admin_headers = super_admin_headers(client, args.auth_url)
+        except httpx.HTTPError as e:
+            print(f"Could not log in as the seed super_admin at {args.auth_url} ({e})", file=sys.stderr)
+            return 1
         for n, bucket in enumerate(buckets, start=1):
             name = HOSPITAL_NAME_TEMPLATE.format(n=n)
             try:
-                hospital = ensure_hospital(client, args.auth_url, name)
+                hospital = ensure_hospital(client, args.auth_url, name, admin_headers)
                 token = ensure_admin_token(client, args.auth_url, hospital["id"],
                                            ADMIN_EMAIL_TEMPLATE.format(n=n))
             except httpx.HTTPError as e:

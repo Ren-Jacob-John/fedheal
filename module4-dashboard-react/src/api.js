@@ -13,10 +13,15 @@ export const SYNTHESIS_API_BASE =
   import.meta.env.VITE_SYNTHESIS_API_BASE || "http://localhost:8006";
 
 export class ApiError extends Error {
-  constructor(message, status) {
+  // `detail` is the server's structured error body when it sent one
+  // (e.g. {status: "incomplete_data", missing_features: [...]}); `code` is
+  // its machine-readable status string.
+  constructor(message, status, detail) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.detail = detail && typeof detail === "object" ? detail : null;
+    this.code = this.detail?.status ?? null;
   }
 }
 
@@ -64,7 +69,11 @@ async function request(base, path, { method = "GET", token, body, form, file } =
     } catch {
       /* body wasn't JSON — fall through to the generic message */
     }
-    throw new ApiError(detail || `${method} ${path} failed (${resp.status})`, resp.status);
+    const message =
+      typeof detail === "string"
+        ? detail
+        : detail?.message || `${method} ${path} failed (${resp.status})`;
+    throw new ApiError(message, resp.status, detail);
   }
 
   if (resp.status === 204) return null;
@@ -89,16 +98,22 @@ export const authApi = {
     return request(AUTH_API_BASE, "/me", { token });
   },
 
+  // The caller's own hospital's stored vitals records (Module 1). Hospital
+  // scope comes from the session, never from a parameter.
+  listVitals(token) {
+    return request(AUTH_API_BASE, "/vitals", { token });
+  },
+
   // Clears the httpOnly session cookie server-side. No token needed — the
   // cookie itself is what authenticates this request.
   logout() {
     return request(AUTH_API_BASE, "/logout", { method: "POST" });
   },
 
-  // Public directory — no token required. Only name/id/is_active per
-  // hospital, which is exactly what the map needs to place a node for
-  // every hospital in the federation without leaking anything about
-  // hospitals a viewer isn't scoped to.
+  // Directory of federation members — requires a logged-in session (the
+  // httpOnly cookie is sent by request()); anonymous callers get 401. Only
+  // name/id/is_active/requires_label per hospital, which is exactly what
+  // the map needs to place a node for every hospital in the federation.
   hospitals() {
     return request(AUTH_API_BASE, "/hospitals");
   },
@@ -176,24 +191,32 @@ export const adminApi = {
   },
 };
 
-// ---------- Module 8 — Synthesis (Sprint B) ----------
+// ---------- Module 8 — Synthesis ----------
 //
-// Deliberately one call for one condition right now: `heart_disease` is
-// the only condition whose specialist (vitals) is genuinely real end to
-// end today — see module8-synthesis.md's "HTTP surface" section. `features`
-// must be in tabular_vitals.FEATURE_NAMES order (age, resting_bp,
-// cholesterol, max_heart_rate, bmi, glucose, num_medications,
-// prior_admissions) — this is the model's own feature space, not Module
-// 1's stored upload schema (the two aren't reconciled yet, see
-// docs/DEVELOPMENT_PLAN.md's Sprint A risk register).
+// Record-based: the dashboard sends only a record id. Module 8 reads the
+// stored, validated record from Module 1 using the caller's own session
+// (no service credential exists in the browser), maps it to model inputs,
+// routes it through Module 6 and returns the result with the model's
+// stub/fallback/training status and an explanation whose feature names are
+// the model's real inputs. Errors carry `err.code`: incomplete_data,
+// record_not_validated, unknown_condition, unsupported_input,
+// specialist_unavailable, ... (see module8-synthesis.md).
 export const synthesisApi = {
   base: SYNTHESIS_API_BASE,
 
-  synthesizeHeartDisease(token, features) {
-    return request(SYNTHESIS_API_BASE, "/synthesize/heart_disease", {
+  synthesizeRecord(token, recordId, condition = "heart_disease") {
+    return request(SYNTHESIS_API_BASE, "/synthesize/record", {
       method: "POST",
       token,
-      body: { features },
+      body: { record_id: recordId, condition },
     });
+  },
+
+  modelStatus(token, condition = "heart_disease") {
+    return request(
+      SYNTHESIS_API_BASE,
+      `/models/status?condition=${encodeURIComponent(condition)}`,
+      { token }
+    );
   },
 };

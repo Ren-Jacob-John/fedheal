@@ -13,7 +13,7 @@ Prerequisites (same shape as simulate_real.py's):
      (default http://localhost:8001).
   2. This hospital already has >= --min-records validated vitals uploaded
      (dashboard upload form, or POST /vitals/upload / /validate/vitals/csv).
-  3. FEDHEAL_SVC_KEY_M3_M1 exported here matching Module 1's, so
+  3. FEDHEAL_SVC_TOKEN_M3_M1 exported here (a token scoped to THIS hospital, minted with module1-auth/mint_service_token.py), so
      GET /vitals/export authenticates (see real_data.py).
 
 Usage — start the server once:

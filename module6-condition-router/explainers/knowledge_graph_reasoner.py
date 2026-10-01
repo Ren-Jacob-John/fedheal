@@ -32,11 +32,15 @@ ONTOLOGY_LOOKUP: dict[tuple[str, str], tuple[str, str, str]] = {
     ("cbc", "no_leukemia_suspected"): (
         "Z00.00", "Blood count pattern within expected ranges.",
         "No further hematologic workup indicated at this time."),
+    # Vitals entries are keyed on the model's LABEL only. They deliberately do
+    # not describe which inputs drove the result (the old text named "glucose"
+    # and "medication load" — glucose is not an input, and this lookup never
+    # sees the features). Attribution comes from SHAP, not from here.
     ("vitals", "high_risk"): (
-        "R94.39", "Combined vitals pattern (age, BP, glucose, medication load) indicates elevated risk.",
-        "Recommend cardiology/endocrinology follow-up as appropriate."),
+        "R94.39", "The vitals model returned its high-risk label for this record.",
+        "Clinician review of the record is recommended."),
     ("vitals", "low_risk"): (
-        "Z00.00", "Vitals pattern within expected ranges for this population.",
+        "Z00.00", "The vitals model returned its low-risk label for this record.",
         "Continue routine monitoring."),
     ("chest_xray", "pneumonia"): (
         "J18.9", "Radiographic pattern consistent with pneumonia.",
@@ -95,4 +99,8 @@ class KnowledgeGraphReasoner(Explainer):
             method=self.name,
             summary=f"[{icd10_code}] {reason} Suggested next step: {next_step}",
             details={"icd10_code": icd10_code, "reason": reason, "suggested_next_step": next_step},
+            # A static (modality, label) -> text table: reference material, NOT
+            # an explanation of this patient's data. Consumers must not present
+            # it as feature attribution.
+            metadata={"data_driven": False, "kind": "reference_lookup"},
         )

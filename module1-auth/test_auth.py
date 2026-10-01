@@ -53,8 +53,32 @@ def _unique_email(label: str) -> str:
     return f"{label}-{uuid.uuid4().hex[:8]}@test.fedheal.local"
 
 
+_bootstrap_super_admin_token: str | None = None
+
+
+def _super_admin_token_for_setup() -> str:
+    """
+    POST /hospitals is SUPER_ADMIN-only, so test setup that needs a hospital
+    logs in as one — bootstrapped straight through the ORM once per run (the
+    same way _seed_super_admin does; there is deliberately no HTTP path for
+    creating the first admin).
+    """
+    global _bootstrap_super_admin_token
+    if _bootstrap_super_admin_token is None:
+        session = database.SessionLocal()
+        try:
+            _, _bootstrap_super_admin_token = _seed_super_admin(session)
+        finally:
+            session.close()
+    return _bootstrap_super_admin_token
+
+
 def _make_hospital(name: str | None = None) -> dict:
-    resp = client.post("/hospitals", json={"name": name or f"Hospital {uuid.uuid4().hex[:8]}"})
+    resp = client.post(
+        "/hospitals",
+        json={"name": name or f"Hospital {uuid.uuid4().hex[:8]}"},
+        headers=_auth_headers(_super_admin_token_for_setup()),
+    )
     assert resp.status_code == 200, resp.text
     return resp.json()
 

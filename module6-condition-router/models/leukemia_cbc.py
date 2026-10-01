@@ -23,6 +23,8 @@ class LeukemiaCBCModel(SpecialistModel):
     name = "lightgbm-leukemia-cbc-v1"
     modality = "cbc"
     task = "classification"
+    feature_names = FEATURE_NAMES
+    training_status = "untrained"
 
     def __init__(self):
         self.model = LGBMClassifier(n_estimators=150, max_depth=5, learning_rate=0.1,

@@ -52,16 +52,19 @@ records are stored against that hospital.
 4. `GET /vitals/flagged` and `POST /vitals/{record_id}/review` let a
    hospital admin see and clear flagged records from the dashboard.
 5. `GET /vitals/export` is a **service-to-service** endpoint (guarded by a
-   shared secret, `FEDHEAL_SVC_KEY_M3_M1`) that only Module 3's
+   a signed, **hospital-scoped** service token — see `docs/SECURITY.md`;
+   a valid token for hospital A gets 403 for hospital B) that only Module 3's
    `real_data.py` calls, to pull validated records for federated training
    — no human-facing client should call this.
 6. `GET /training-status` reports whether a hospital has at least
    `MIN_RECORDS_FOR_TRAINING` (10) stored records — an honest floor so the
    dashboard never claims "ready" after a single test upload.
 
-**Multi-tenancy / hospital management:** `POST /hospitals`, `GET
-/hospitals`, `PATCH /hospitals/{id}` — super-admin-only endpoints to
-create hospitals and toggle their active status.
+**Multi-tenancy / hospital management:** `POST /hospitals` and
+`PATCH /hospitals/{id}` are super-admin-only (401 without a valid session,
+403 for any other role). `GET /hospitals` requires a logged-in session (or
+a Module 3 service token, which sees only its own hospital) — it is no
+longer an anonymous directory.
 
 ## How to run it
 
@@ -124,12 +127,20 @@ commented list):
   SQLite fallback.
 - `FEDMED_JWT_SECRET` — **must be identical** across every FedHeal service
   that verifies this token (Modules 1 and 7).
-- `FEDHEAL_SVC_KEY_M3_M1` — shared secret Module 3 uses to call
-  `/vitals/export`.
+- `FEDHEAL_ENV` — `development` locally. **Unset means production**: the app
+  refuses to start on missing/short/placeholder secrets.
+- `FEDHEAL_SVC_SIGNING_KEY_M3_M1` — verifies Module 3's hospital-scoped
+  tokens on `/vitals/export` and `GET /hospitals`. Mint a hospital's token
+  with `python mint_service_token.py --hospital-id <id>`.
+- `FEDHEAL_SVC_SIGNING_KEY_M1_M2` — signs the per-upload token Module 1
+  sends to Module 2.
+- `FEDHEAL_MAX_JSON_BODY_BYTES`, `FEDHEAL_MAX_CSV_BYTES`,
+  `FEDHEAL_MAX_RECORDS`, `FEDHEAL_MAX_RECORD_FIELDS`,
+  `FEDHEAL_MAX_FIELD_CHARS` — upload limits (413 when exceeded).
 - `FEDHEAL_VALIDATION_API_URL` — where Module 2 is reachable.
 - `FEDHEAL_DASHBOARD_ORIGIN` — comma-separated list of allowed CORS
   origins (the dashboard's actual URL(s)).
-- `FEDHEAL_COOKIE_SECURE` — set `true` once served over HTTPS.
+- `FEDHEAL_COOKIE_SECURE` — forced on in staging/production.
 
 `GET /health` returns `{"status": "ok"}` — added in Sprint B so every
 module now has the same deployment health-check shape (Modules 2 and 7

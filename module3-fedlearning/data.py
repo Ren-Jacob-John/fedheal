@@ -15,6 +15,9 @@ import numpy as np
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 
+# SIMULATION-ONLY labels on make_classification's random columns. They are NOT
+# Module 1's fields and not what the real-data path trains on — that is
+# real_data.FEATURE_KEYS (see docs/DATA_CONTRACT.md). Only N_FEATURES is used elsewhere.
 FEATURE_NAMES = [
     "age", "resting_bp", "cholesterol", "max_heart_rate",
     "bmi", "glucose", "num_medications", "prior_admissions",

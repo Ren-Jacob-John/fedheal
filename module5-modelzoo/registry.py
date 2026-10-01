@@ -247,10 +247,17 @@ def registry_status(registry: dict[str, list]) -> list[dict]:
     rows = []
     for modality, models in registry.items():
         for m in models:
+            card = m.describe() if hasattr(m, "describe") else {}
             rows.append({
                 "modality": modality,
                 "model_name": m.name,
                 "task": m.task,
                 "real": not getattr(m, "is_stub", False) and not m.name.startswith("stub-"),
+                # New: never make a consumer infer these from the name.
+                "is_stub": card.get("is_stub", m.name.startswith("stub-")),
+                "is_fallback": card.get("is_fallback", False),
+                "training_status": card.get("training_status", "unknown"),
+                "model_version": card.get("model_version", "unversioned"),
+                "available": card.get("available", True),
             })
     return rows

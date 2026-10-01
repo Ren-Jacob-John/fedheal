@@ -242,11 +242,13 @@ first setup:
 
 | Variable | Must be identical in | Purpose |
 |---|---|---|
-| `FEDMED_JWT_SECRET` | Module 1, Module 7 | Module 7 only verifies tokens Module 1 issues |
-| `FEDHEAL_SVC_KEY_M3_M1` | Module 1, Module 3 (`real_data.py`) | lets Module 3 call Module 1's `/vitals/export` |
+| `FEDHEAL_ENV` | every service | `development` for local work; **unset = production**, which refuses to start with missing/placeholder secrets |
+| `FEDMED_JWT_SECRET` | Module 1, 7, 8 | Modules 7 and 8 only verify tokens Module 1 issues |
+| `FEDHEAL_SVC_SIGNING_KEY_M3_M1` | Module 1; Module 3 **operator** only | Module 1 verifies hospital-scoped tokens with it; the operator's `simulate_real.py` mints them. Hospitals hold a scoped **token** (`FEDHEAL_SVC_TOKEN_M3_M1`), never this key |
+| `FEDHEAL_SVC_SIGNING_KEY_M1_M2` | Module 1, Module 2 | Module 1 mints a per-upload token for Module 2; Module 2 verifies it |
 | `FEDHEAL_SVC_KEY_M2_M7` | Module 2, Module 7 | lets Module 2 post rolled-up validation flags |
 | `FEDHEAL_SVC_KEY_M3_M7` | Module 3, Module 7 | lets Module 3 post round/accuracy history |
-| `FEDHEAL_DASHBOARD_ORIGIN` | Module 1, Module 7 | must equal the dashboard's real origin (default `http://localhost:5173`) so CORS allows it |
+| `FEDHEAL_DASHBOARD_ORIGIN` | Module 1, 7, 8 | must equal the dashboard's real origin (default `http://localhost:5173`) so CORS allows it |
 
 For a first local run, the `.env.example` defaults already agree with
 each other — you only need to change values if you're deploying beyond
@@ -306,7 +308,7 @@ single-process simulation:
 cd module3-fedlearning
 python simulate.py          # synthetic data, no other services required
 # or, against real uploaded/validated hospital data (needs Module 1 up
-# and FEDHEAL_SVC_KEY_M3_M1 configured):
+# and FEDHEAL_SVC_SIGNING_KEY_M3_M1 configured):
 python simulate_real.py
 ```
 
@@ -364,7 +366,11 @@ with one command.
   Modules 1 and 7 must exactly match the URL the dashboard is actually
   running at (including port).
 - **Module 3 can't reach Module 1's `/vitals/export`** → confirm Module 1
-  is up first and `FEDHEAL_SVC_KEY_M3_M1` matches in both `.env` files.
+  is up first and `FEDHEAL_SVC_SIGNING_KEY_M3_M1` (operator) or
+  `FEDHEAL_SVC_TOKEN_M3_M1` (hospital client, minted for that hospital)
+  is set. A 403 means the token is for a different hospital.
+- **Security model, endpoint table, and required configuration** →
+  [`docs/SECURITY.md`](docs/SECURITY.md).
 - **Everything in Module 5/6 shows `[STUB]`** → expected without
   `torch`/GPU/Hugging Face Hub access in your environment; this is the
   registry's safe fallback behavior, not a bug. See those modules'

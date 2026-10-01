@@ -25,9 +25,13 @@ from typing import Literal, Optional
 
 import httpx
 import pandas as pd
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import Depends, FastAPI, UploadFile, File, Form, HTTPException, Header, Request
 from pydantic import BaseModel, ValidationError
 
+import config
+import limits
+import service_auth
+from audit import audit_event
 from anomaly import flag_outliers
 from rules import (
     check_forbidden_fields,
@@ -47,7 +51,74 @@ mount_custom_docs(app, accent="#1f9d63", accent_soft="#dcf5e8")  # green — Mod
 # reason string, never a raw record, matching the "operator can see flags,
 # never patient data" design.
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
-ADMIN_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M2_M7", "iammightythor")
+# Module 2 -> Module 7 flag reports (outbound). Required in staging/production.
+ADMIN_SERVICE_KEY = config.get_secret("FEDHEAL_SVC_KEY_M2_M7", dev_default="dev-only-key-module2-to-module7")
+
+# ---- Inbound access control ------------------------------------------------
+# This service is INTERNAL: the browser talks to Module 1, and Module 1
+# forwards uploads here. Every /validate/* call must carry a service
+# credential minted by Module 1 for the uploading hospital (see
+# service_auth.py). Verification key is shared with Module 1 only.
+VALIDATE_SIGNING_KEY = config.get_secret(
+    "FEDHEAL_SVC_SIGNING_KEY_M1_M2",
+    dev_default="dev-only-signing-key-module1-to-module2",
+)
+VALIDATE_CALLERS = frozenset({"module1"})
+
+UPLOAD_LIMITS = limits.UploadLimits.from_env()
+# Module 1 already enforces the same limits and adds a small wrapper around
+# what it forwards, so this service allows slightly more than Module 1 does
+# instead of rejecting something Module 1 legitimately accepted.
+_JSON_LIMIT = UPLOAD_LIMITS.max_json_body_bytes + limits.MULTIPART_OVERHEAD_BYTES
+_CSV_LIMIT = UPLOAD_LIMITS.max_csv_bytes + limits.MULTIPART_OVERHEAD_BYTES
+
+app.add_middleware(
+    limits.BodySizeLimitMiddleware,
+    limits={"/validate/vitals": _JSON_LIMIT, "/validate/vitals/csv": _CSV_LIMIT},
+)
+# Browsers never call this service directly (Module 1 does, server-side), so
+# no cross-origin browser access is granted at all — no CORS middleware.
+
+
+def require_validation_credential(
+    request: Request,
+    x_service_key: str | None = Header(default=None),
+) -> dict:
+    """401: missing/forged/expired credential. 403: a valid credential for
+    a different service or endpoint. Returns the verified claims."""
+    try:
+        return service_auth.verify_service_token(
+            x_service_key,
+            signing_key=VALIDATE_SIGNING_KEY,
+            allowed_audiences={service_auth.AUD_VALIDATE},
+            allowed_callers=VALIDATE_CALLERS,
+        )
+    except HTTPException as exc:
+        audit_event(
+            "service_authn.failure", "denied", request=request,
+            reason="invalid_credential" if exc.status_code == 401 else "service_not_permitted",
+            status_code=exc.status_code,
+        )
+        raise
+
+
+def resolve_tenant(request: Request, claims: dict, requested_hospital_id: str | None) -> str:
+    """
+    The hospital this validation belongs to comes from the credential. A
+    caller-supplied hospital_id is accepted only if it matches (it exists for
+    backwards compatibility); a mismatch is a 403 and an audit event, and a
+    credential with no single-hospital scope is not accepted here at all.
+    """
+    token_hospital = service_auth.hospital_scope(claims)
+    if not token_hospital or token_hospital == service_auth.ANY_HOSPITAL:
+        audit_event("validate", "denied", request=request, actor_service=claims.get("sub"),
+                    reason="credential_not_tenant_scoped")
+        raise HTTPException(status_code=403, detail="Credential is not scoped to a hospital")
+    if requested_hospital_id is not None and requested_hospital_id != token_hospital:
+        audit_event("cross_tenant.attempt", "denied", request=request, actor_service=claims.get("sub"),
+                    requested_hospital_id=requested_hospital_id, token_hospital_id=token_hospital)
+        raise HTTPException(status_code=403, detail="Credential is not authorized for this hospital")
+    return token_hospital
 
 
 def report_flags_to_admin(hospital_id: str | None, results: list["ValidationResult"]) -> None:
@@ -175,8 +246,18 @@ def _validate_records(
 
 
 @app.post("/validate/vitals", response_model=BatchValidationResponse)
-def validate_vitals_batch(payload: BatchValidationRequest):
-    return _validate_records(payload.records, payload.hospital_id, payload.require_label)
+def validate_vitals_batch(
+    payload: BatchValidationRequest,
+    request: Request,
+    claims: dict = Depends(require_validation_credential),
+):
+    hospital_id = resolve_tenant(request, claims, payload.hospital_id)
+    limits.check_records(payload.records, UPLOAD_LIMITS)
+    result = _validate_records(payload.records, hospital_id, payload.require_label)
+    audit_event("validate", "success", request=request, actor_service=claims.get("sub"),
+                hospital_id=hospital_id, total=result.total, passed=result.passed,
+                flagged=result.flagged, rejected=result.rejected)
+    return result
 
 
 # CSV upload — most hospitals will export from their own EHR/spreadsheet
@@ -189,18 +270,28 @@ def validate_vitals_batch(payload: BatchValidationRequest):
 # same way a missing JSON field would.
 @app.post("/validate/vitals/csv", response_model=BatchValidationResponse)
 async def validate_vitals_csv(
+    request: Request,
     file: UploadFile = File(...),
     hospital_id: Optional[str] = Form(None),
     require_label: bool = Form(False),
+    claims: dict = Depends(require_validation_credential),
 ):
-    if not file.filename.lower().endswith(".csv"):
+    tenant_id = resolve_tenant(request, claims, hospital_id)
+    if not (file.filename or "").lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Expected a .csv file")
 
     raw_bytes = await file.read()
+    if len(raw_bytes) > UPLOAD_LIMITS.max_csv_bytes:
+        raise limits.too_large(f"CSV file too large (limit {UPLOAD_LIMITS.max_csv_bytes} bytes)")
     try:
-        df = pd.read_csv(io.BytesIO(raw_bytes))
+        # nrows caps parsing work at one row past the limit, enough to detect "too many".
+        df = pd.read_csv(io.BytesIO(raw_bytes), nrows=UPLOAD_LIMITS.max_records + 1)
     except Exception as e:  # pandas raises several different error types here
         raise HTTPException(status_code=400, detail=f"Could not parse CSV: {e}")
+    if len(df) > UPLOAD_LIMITS.max_records:
+        raise limits.too_large(f"Too many records in one request (limit {UPLOAD_LIMITS.max_records})")
+    if len(df.columns) > UPLOAD_LIMITS.max_record_fields:
+        raise limits.too_large(f"CSV has too many columns (limit {UPLOAD_LIMITS.max_record_fields})")
 
     # NaN -> None so pydantic sees a missing optional field, not a float
     # NaN. df.where(df.notnull(), None) looks like it should do this but
@@ -212,7 +303,12 @@ async def validate_vitals_csv(
         {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in rec.items()}
         for rec in records
     ]
-    return _validate_records(records, hospital_id, require_label)
+    limits.check_records(records, UPLOAD_LIMITS)
+    result = _validate_records(records, tenant_id, require_label)
+    audit_event("validate_csv", "success", request=request, actor_service=claims.get("sub"),
+                hospital_id=tenant_id, total=result.total, passed=result.passed,
+                flagged=result.flagged, rejected=result.rejected)
+    return result
 
 
 @app.get("/health")

@@ -41,15 +41,16 @@ this is now the single supported dashboard going forward.
 - `src/components/FlaggedReview.jsx` — lists a hospital's flagged
   records and lets an admin clear them (calls Module 1's
   `/vitals/{id}/review`).
-- `src/components/SynthesisView.jsx` (new in Sprint B) — the Module 8
-  view: a case-entry form (the `vitals` specialist's own 8 features),
-  calls `POST /synthesize/heart_disease`, and renders the resulting
-  `SynthesisReport` — disclaimer, urgent-review flags, one card per
-  specialist finding with a visible stub badge when a finding came from
-  a placeholder model, missing-input list, and the
-  `requires_clinician_review` line. Available to any logged-in user, not
-  just super_admin — this is a per-case clinical tool, not an admin
-  action.
+- `src/components/SynthesisView.jsx` — the Module 8 view, record-based: the
+  user picks one of their hospital's stored records (`GET /vitals`, Module 1;
+  records awaiting review are disabled), the dashboard sends only the
+  record id to `POST /synthesize/record`, and renders the selected record,
+  the model's status (STUB / FALLBACK / training status / not-federated
+  badges), the prediction, the explanation status (SHAP chart only when it
+  was really produced; otherwise "Explanation unavailable" with the reason),
+  the inputs used, warnings, and an **incomplete-data** panel naming the
+  missing features. No clinical values are typed in and no service
+  credential exists in the browser — only the user's own session.
 - `src/components/ShapChart.jsx` (new in Sprint B) — a diverging SVG bar
   chart of one finding's SHAP per-feature contributions (positive =
   pushed the prediction toward the predicted class, negative = pushed

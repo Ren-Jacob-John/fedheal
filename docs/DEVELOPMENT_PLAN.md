@@ -124,6 +124,12 @@ schedule slack the other weeks can borrow.
 
 ### Sprint C — Sep 28 to Oct 4 (finish week 14, start week 15)
 
+> **Integration pass (done before Sprint C work):** the vitals specialist now
+> consumes Module 1's stored schema through an explicit mapper, with
+> model/stub/fallback status end to end and a record-based synthesis view —
+> see **`docs/DATA_CONTRACT.md`**. Module 8's model is still a labelled demo
+> fallback; a federated global model needs a Module 3 export step first.
+
 - **Frontend, finish (P4):** Module 8 synthesis view and SHAP charts
   fully wired and demoable end-to-end (upload → route → synthesize →
   view, in the dashboard, on real vitals data).

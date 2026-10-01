@@ -53,10 +53,73 @@ import httpx
 import numpy as np
 from sklearn.model_selection import train_test_split
 
+import config
+import service_auth
+
 logger = logging.getLogger(__name__)
 
 AUTH_API_URL = os.environ.get("FEDHEAL_AUTH_API_URL", "http://localhost:8001")
-SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M1", "iamgodofthunder")
+
+# ---- Module 3 -> Module 1 credentials --------------------------------------
+# Module 1 no longer accepts one static key that unlocks every hospital.
+# Credentials are signed tokens scoped to a hospital (see service_auth.py):
+#
+#   A hospital's own client (client_runner.py) holds ONE pre-minted token,
+#   FEDHEAL_SVC_TOKEN_M3_M1, issued for that hospital by
+#   `module1-auth/mint_service_token.py`. It can export that hospital's
+#   vitals and see that hospital in the directory — nothing else.
+#
+#   The central operator tool (simulate_real.py, which pools every active
+#   hospital in one process by design) holds the signing key,
+#   FEDHEAL_SVC_SIGNING_KEY_M3_M1, and mints a short-lived token per
+#   hospital. Never distribute that key to hospital-side machines.
+#
+# Evaluated per call (not at import) so an unused mode never demands a
+# secret it doesn't have, and so tests/CLIs can set the environment late.
+_DEV_SIGNING_KEY = "dev-only-signing-key-module3-to-module1"
+config.warn_if_set("FEDHEAL_SVC_KEY_M3_M1", "FEDHEAL_SVC_TOKEN_M3_M1 / FEDHEAL_SVC_SIGNING_KEY_M3_M1")
+
+
+def _hospital_token() -> str | None:
+    return config.get_optional_secret("FEDHEAL_SVC_TOKEN_M3_M1", min_len=40)
+
+
+def _signing_key() -> str | None:
+    return config.get_optional_secret("FEDHEAL_SVC_SIGNING_KEY_M3_M1", dev_default=_DEV_SIGNING_KEY)
+
+
+def _no_credential_error() -> RuntimeError:
+    return RuntimeError(
+        "No Module 1 credential configured. A hospital client needs "
+        "FEDHEAL_SVC_TOKEN_M3_M1 (mint one with module1-auth/mint_service_token.py); "
+        "the operator's pooled simulation needs FEDHEAL_SVC_SIGNING_KEY_M3_M1."
+    )
+
+
+def _export_headers(hospital_id: str) -> dict:
+    token = _hospital_token()
+    if token is None:
+        key = _signing_key()
+        if key is None:
+            raise _no_credential_error()
+        token = service_auth.mint_service_token(
+            key, caller="module3", audience=service_auth.AUD_VITALS_EXPORT,
+            hospital_id=hospital_id, ttl_seconds=300,
+        )
+    return {"X-Service-Key": token}
+
+
+def _directory_headers() -> dict:
+    token = _hospital_token()
+    if token is None:
+        key = _signing_key()
+        if key is None:
+            raise _no_credential_error()
+        token = service_auth.mint_service_token(
+            key, caller="module3", audience=service_auth.AUD_HOSPITAL_DIRECTORY,
+            hospital_id=service_auth.ANY_HOSPITAL, ttl_seconds=300,
+        )
+    return {"X-Service-Key": token}
 FEATURE_KEYS = [
     "age_years", "systolic_bp", "diastolic_bp", "heart_rate_bpm",
     "weight_kg", "height_cm", "medication_count", "medication_mg_total",
@@ -193,7 +256,7 @@ def _record_to_features(record: dict) -> np.ndarray:
 
 def list_active_hospitals() -> list[dict]:
     """Hospitals to potentially include in a real federated round."""
-    resp = httpx.get(f"{AUTH_API_URL}/hospitals", timeout=10.0)
+    resp = httpx.get(f"{AUTH_API_URL}/hospitals", headers=_directory_headers(), timeout=10.0)
     resp.raise_for_status()
     return [h for h in resp.json() if h.get("is_active")]
 
@@ -215,7 +278,7 @@ def fetch_hospital_vitals(hospital_id: str, include_flagged: bool = False,
             "include_flagged": include_flagged,
             "labeled_only": labeled_only,
         },
-        headers={"X-Service-Key": SERVICE_KEY},
+        headers=_export_headers(hospital_id),
         timeout=10.0,
     )
     resp.raise_for_status()
@@ -229,7 +292,7 @@ def resolve_hospital_id(hospital_name: str) -> str:
     client by hand shouldn't have to go paste that id out of a database —
     look it up by the hospital's display name instead.
     """
-    resp = httpx.get(f"{AUTH_API_URL}/hospitals", timeout=10.0)
+    resp = httpx.get(f"{AUTH_API_URL}/hospitals", headers=_directory_headers(), timeout=10.0)
     resp.raise_for_status()
     matches = [h for h in resp.json() if h["name"] == hospital_name]
     if not matches:

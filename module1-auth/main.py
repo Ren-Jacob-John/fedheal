@@ -9,14 +9,16 @@ dashboard) should treat "which hospital does this request belong to" as
 answered by this service's JWT, never by a client-supplied field.
 """
 import io
+import logging
 import os
 import time
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 import httpx
-from fastapi import FastAPI, Depends, HTTPException, Request, Response, status, UploadFile, File
+from fastapi import FastAPI, Depends, Header, HTTPException, Request, Response, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -24,7 +26,11 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import auth
+import config
+import limits
 import models
+import service_auth
+from audit import audit_event, hash_identifier
 from database import get_db
 from docs_theme import mount_custom_docs
 
@@ -41,19 +47,24 @@ from docs_theme import mount_custom_docs
 app = FastAPI(title="FedHeal Auth Service", version="0.1.0", docs_url=None)
 mount_custom_docs(app, accent="#5b7cfa", accent_soft="#dfe7ff")  # blue — Module 1
 
-# Locked to the real dashboard origin(s) via env var — comma-separated for
-# multiple environments (e.g. local dev + a deployed preview URL). Falls
-# back to the Vite dev server's default port so local dev keeps working
-# out of the box, but this is no longer "*": a malicious page in someone's
-# browser can no longer make authenticated requests here just because a
-# logged-in user happened to visit it.
-_dashboard_origins = os.environ.get("FEDHEAL_DASHBOARD_ORIGIN", "http://localhost:5173")
+# Upload size limits (see limits.py). Added BEFORE the CORS middleware so
+# CORS wraps it: a 413 still carries CORS headers and the browser can show
+# the real error instead of an opaque network failure.
+UPLOAD_LIMITS = limits.UploadLimits.from_env()
+app.add_middleware(
+    limits.BodySizeLimitMiddleware,
+    limits={
+        "/vitals/upload": UPLOAD_LIMITS.max_json_body_bytes,
+        "/vitals/upload/csv": UPLOAD_LIMITS.max_csv_bytes + limits.MULTIPART_OVERHEAD_BYTES,
+    },
+)
+
+# CORS: explicit origins from FEDHEAL_DASHBOARD_ORIGIN (never "*"; required
+# and https-only in staging/production — see config.cors_settings) and only
+# the methods/headers the dashboard actually uses against this service.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in _dashboard_origins.split(",") if o.strip()],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    **config.cors_settings(methods=("GET", "POST", "PATCH"), headers=("Authorization", "Content-Type")),
 )
 
 # ---------- Rate limiting on /token ----------
@@ -92,10 +103,9 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 # automatically and JS can never read; the JSON body still returns
 # access_token too, for curl/API use exactly as this module's README
 # documents — no need to break that flow. COOKIE_SECURE defaults off for
-# local http dev; set FEDHEAL_COOKIE_SECURE=true once this is served over
-# https.
+# local http dev only; staging/production always set it (config.cookie_secure).
 TOKEN_COOKIE_NAME = "fedheal_token"
-COOKIE_SECURE = os.environ.get("FEDHEAL_COOKIE_SECURE", "false").lower() == "true"
+COOKIE_SECURE = config.cookie_secure()  # always True outside development/test
 
 # Module 2 (validation) — every vitals upload gets forwarded here before
 # anything is stored. Module 1 never re-implements the validation rules.
@@ -248,20 +258,29 @@ def get_current_user(
     # httpOnly cookie the browser dashboard now sends automatically.
     token = token or request.cookies.get(TOKEN_COOKIE_NAME)
     if token is None:
+        audit_event("authn.failure", "denied", request=request, reason="missing_credentials",
+                    level=logging.INFO)
         raise credentials_exception
-    payload = auth.decode_access_token(token)
+    payload, why = auth.inspect_access_token(token)
     if payload is None:
+        audit_event("authn.failure", "denied", request=request, reason=f"{why}_token")
         raise credentials_exception
     user_id = payload.get("sub")
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if user is None:
+        audit_event("authn.failure", "denied", request=request, reason="unknown_user")
         raise credentials_exception
     return user
 
 
 def require_role(*allowed_roles: models.Role):
-    def checker(user: models.User = Depends(get_current_user)) -> models.User:
+    def checker(request: Request, user: models.User = Depends(get_current_user)) -> models.User:
         if user.role not in allowed_roles:
+            audit_event(
+                "authz.denied", "denied", request=request,
+                actor_user_id=user.id, actor_role=user.role, hospital_id=user.hospital_id,
+                required_roles=",".join(r.value for r in allowed_roles),
+            )
             raise HTTPException(status_code=403, detail="Not permitted for this role")
         return user
     return checker
@@ -272,23 +291,87 @@ def health():
     return {"status": "ok"}
 
 
-# ---------- Hospital onboarding (super-admin only in practice) ----------
+# ---------- Hospital onboarding (SUPER_ADMIN only) ----------
 
 @app.post("/hospitals", response_model=HospitalOut)
-def create_hospital(payload: HospitalCreate, db: Session = Depends(get_db)):
+def create_hospital(
+    payload: HospitalCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_role(models.Role.SUPER_ADMIN)),
+):
     existing = db.query(models.Hospital).filter(models.Hospital.name == payload.name).first()
     if existing:
+        audit_event("hospital.create", "failure", request=request, actor_user_id=admin.id,
+                    actor_role=admin.role, reason="duplicate_name")
         raise HTTPException(status_code=400, detail="Hospital already exists")
     hospital = models.Hospital(name=payload.name, requires_label=payload.requires_label)
     db.add(hospital)
     db.commit()
     db.refresh(hospital)
+    audit_event("hospital.create", "success", request=request, actor_user_id=admin.id,
+                actor_role=admin.role, target_hospital_id=hospital.id,
+                requires_label=hospital.requires_label)
     return hospital
 
 
+@dataclass
+class DirectoryPrincipal:
+    """Who is asking for the hospital list, and which hospitals that entitles
+    them to see: None = all, otherwise exactly one hospital id."""
+    scope: Optional[str]
+    user: Optional[models.User] = None
+    service: Optional[str] = None
+
+
+def get_directory_principal(
+    request: Request,
+    x_service_key: str | None = Header(default=None),
+    token: str | None = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> DirectoryPrincipal:
+    """
+    GET /hospitals accepts EITHER a logged-in user (same JWT as everywhere
+    else) OR a hospital-scoped Module 3 service credential. Anonymous -> 401.
+    """
+    if x_service_key is not None:
+        try:
+            claims = auth.verify_directory_credential(x_service_key)
+        except HTTPException as exc:
+            audit_event("authn.failure", "denied", request=request, actor_service="module3",
+                        reason="service_credential_" + ("invalid" if exc.status_code == 401 else "not_permitted"))
+            raise
+        hid = service_auth.hospital_scope(claims)
+        # A wildcard is only meaningful on a directory-audience token; an
+        # export-audience token never widens beyond its own hospital.
+        if hid == service_auth.ANY_HOSPITAL and claims.get("aud") == service_auth.AUD_HOSPITAL_DIRECTORY:
+            return DirectoryPrincipal(scope=None, service=claims["sub"])
+        return DirectoryPrincipal(scope=hid if hid and hid != service_auth.ANY_HOSPITAL else "", service=claims["sub"])
+    # Any authenticated user: the dashboard's federation map is documented
+    # to place a node for EVERY hospital in the federation (id / name /
+    # active flag), so logged-in users get the full directory. Anonymous
+    # callers get nothing.
+    user = get_current_user(request, token, db)
+    return DirectoryPrincipal(scope=None, user=user)
+
+
 @app.get("/hospitals", response_model=list[HospitalOut])
-def list_hospitals(db: Session = Depends(get_db)):
-    return db.query(models.Hospital).all()
+def list_hospitals(
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: DirectoryPrincipal = Depends(get_directory_principal),
+):
+    """
+    Authenticated (was an anonymous directory). Any logged-in user sees the
+    full minimal directory the federation map needs; Module 3's credentials
+    are narrower — a hospital-scoped service token sees only its own
+    hospital, and only the operator's directory-audience token sees all.
+    Nothing here returns vitals or user data.
+    """
+    query = db.query(models.Hospital)
+    if principal.scope is not None:
+        query = query.filter(models.Hospital.id == principal.scope)
+    return query.all()
 
 
 # Added for Module 7 (Admin/Platform): the operator's "activate/deactivate
@@ -298,6 +381,7 @@ def list_hospitals(db: Session = Depends(get_db)):
 def set_hospital_status(
     hospital_id: str,
     payload: HospitalStatusUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     _admin: models.User = Depends(require_role(models.Role.SUPER_ADMIN)),
 ):
@@ -315,6 +399,9 @@ def set_hospital_status(
         hospital.requires_label = payload.requires_label
     db.commit()
     db.refresh(hospital)
+    audit_event("hospital.update", "success", request=request, actor_user_id=_admin.id,
+                actor_role=_admin.role, target_hospital_id=hospital.id,
+                is_active=hospital.is_active, requires_label=hospital.requires_label)
     return hospital
 
 
@@ -356,6 +443,7 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
 @app.post("/admin/users", response_model=UserOut)
 def create_admin_user(
     payload: AdminUserCreate,
+    request: Request,
     db: Session = Depends(get_db),
     _admin: models.User = Depends(require_role(models.Role.SUPER_ADMIN)),
 ):
@@ -388,6 +476,9 @@ def create_admin_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    audit_event("admin.user_create", "success", request=request, actor_user_id=_admin.id,
+                actor_role=_admin.role, target_user_id=user.id, target_role=user.role,
+                target_hospital_id=user.hospital_id)
     return user
 
 
@@ -399,10 +490,19 @@ def login(
     db: Session = Depends(get_db),
 ):
     client_ip = request.client.host if request.client else "unknown"
-    _check_login_rate_limit(f"{client_ip}:{form_data.username}")
+    try:
+        _check_login_rate_limit(f"{client_ip}:{form_data.username}")
+    except HTTPException:
+        audit_event("login", "denied", request=request, reason="rate_limited",
+                    username_hash=hash_identifier(form_data.username))
+        raise
 
     user = db.query(models.User).filter(models.User.email == form_data.username).first()
     if not user or not auth.verify_password(form_data.password, user.hashed_password):
+        # Never the submitted name/password: a short hash lets repeated
+        # attempts against one account be correlated without storing it.
+        audit_event("login", "failure", request=request, reason="bad_credentials",
+                    username_hash=hash_identifier(form_data.username))
         raise HTTPException(status_code=401, detail="Incorrect email or password")
 
     token = auth.create_access_token(
@@ -417,6 +517,8 @@ def login(
         max_age=auth.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
+    audit_event("login", "success", request=request, actor_user_id=user.id,
+                actor_role=user.role, hospital_id=user.hospital_id)
     return Token(access_token=token)
 
 
@@ -468,15 +570,18 @@ def _label_source(label) -> str:
 @app.post("/vitals/upload", response_model=VitalsUploadResponse)
 async def upload_vitals(
     payload: VitalsUploadRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     hospital = _require_upload_hospital(db, current_user)
+    limits.check_records(payload.records, UPLOAD_LIMITS)  # 413 before anything is forwarded or stored
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 f"{VALIDATION_API_URL}/validate/vitals",
+                headers={"X-Service-Key": auth.mint_validation_token(current_user.hospital_id)},
                 json={
                     "records": payload.records,
                     "hospital_id": current_user.hospital_id,
@@ -520,6 +625,9 @@ async def upload_vitals(
             stored_labeled += 1
     db.commit()
 
+    audit_event("vitals.upload", "success", request=request, actor_user_id=current_user.id,
+                actor_role=current_user.role, hospital_id=current_user.hospital_id,
+                total=validation["total"], stored=stored, rejected=validation["rejected"])
     return VitalsUploadResponse(
         total=validation["total"],
         passed=validation["passed"],
@@ -541,6 +649,7 @@ async def upload_vitals(
 
 @app.post("/vitals/upload/csv", response_model=VitalsUploadResponse)
 async def upload_vitals_csv(
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
@@ -548,10 +657,29 @@ async def upload_vitals_csv(
     hospital = _require_upload_hospital(db, current_user)
 
     raw_bytes = await file.read()
+    if len(raw_bytes) > UPLOAD_LIMITS.max_csv_bytes:
+        raise limits.too_large(f"CSV file too large (limit {UPLOAD_LIMITS.max_csv_bytes} bytes)")
+    # Parse (and bound) the rows BEFORE forwarding, so an oversized CSV is
+    # rejected here with 413 instead of costing a Module 2 round-trip.
+    import csv as _csv
+    try:
+        reader = _csv.DictReader(io.StringIO(raw_bytes.decode("utf-8")))
+        raw_rows = []
+        for row in reader:
+            raw_rows.append(row)
+            if len(raw_rows) > UPLOAD_LIMITS.max_records:
+                break
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded")
+    limits.check_records(raw_rows, UPLOAD_LIMITS)
+    if reader.fieldnames and len(reader.fieldnames) > UPLOAD_LIMITS.max_record_fields:
+        raise limits.too_large(f"CSV has too many columns (limit {UPLOAD_LIMITS.max_record_fields})")
+
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
                 f"{VALIDATION_API_URL}/validate/vitals/csv",
+                headers={"X-Service-Key": auth.mint_validation_token(current_user.hospital_id)},
                 files={"file": (file.filename, raw_bytes, "text/csv")},
                 data={
                     "hospital_id": current_user.hospital_id,
@@ -564,12 +692,9 @@ async def upload_vitals_csv(
 
     validation = resp.json()
 
-    # Re-parse the same CSV here (cheap, and keeps this endpoint from having
-    # to trust a second copy of "what the raw records were" over the wire)
-    # so we can store passed/flagged rows the same way the JSON path does.
-    import csv as _csv
-    reader = _csv.DictReader(io.StringIO(raw_bytes.decode("utf-8")))
-    raw_rows = list(reader)
+    # raw_rows was parsed above from the same bytes (keeps this endpoint from
+    # having to trust a second copy of "what the raw records were" over the
+    # wire) so we can store passed/flagged rows the same way the JSON path does.
 
     stored = 0
     stored_labeled = 0
@@ -604,6 +729,9 @@ async def upload_vitals_csv(
             stored_labeled += 1
     db.commit()
 
+    audit_event("vitals.upload_csv", "success", request=request, actor_user_id=current_user.id,
+                actor_role=current_user.role, hospital_id=current_user.hospital_id,
+                total=validation["total"], stored=stored, rejected=validation["rejected"])
     return VitalsUploadResponse(
         total=validation["total"],
         passed=validation["passed"],
@@ -627,7 +755,10 @@ async def upload_vitals_csv(
 # never trusts a client-supplied hospital_id.
 
 class ReviewDecision(BaseModel):
-    decision: str  # "approve" | "reject"
+    # Constrained (was a free-form str): anything else is a 422 from
+    # pydantic before the endpoint runs. The accepted values and what they
+    # do are unchanged.
+    decision: Literal["approve", "reject"]
 
 
 @app.get("/vitals/flagged", response_model=list[StoredVitalsOut])
@@ -651,6 +782,7 @@ def list_flagged_vitals(
 def review_flagged_vitals(
     record_id: str,
     payload: ReviewDecision,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(
         require_role(models.Role.HOSPITAL_ADMIN, models.Role.SUPER_ADMIN)
@@ -660,6 +792,9 @@ def review_flagged_vitals(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     if current_user.role != models.Role.SUPER_ADMIN and record.hospital_id != current_user.hospital_id:
+        audit_event("cross_tenant.attempt", "denied", request=request, actor_user_id=current_user.id,
+                    actor_role=current_user.role, hospital_id=current_user.hospital_id,
+                    target_hospital_id=record.hospital_id, record_id=record_id, decision=payload.decision)
         raise HTTPException(status_code=403, detail="Not permitted for this hospital's records")
     if record.validation_status != "flagged":
         raise HTTPException(status_code=400, detail="Only flagged records can be reviewed")
@@ -667,13 +802,18 @@ def review_flagged_vitals(
     if payload.decision == "approve":
         record.validation_status = "passed"
         db.commit()
+        audit_event("vitals.review", "success", request=request, actor_user_id=current_user.id,
+                    actor_role=current_user.role, hospital_id=record.hospital_id,
+                    record_id=record_id, decision="approve")
         return {"id": record_id, "validation_status": "passed"}
-    elif payload.decision == "reject":
-        db.delete(record)
-        db.commit()
-        return {"id": record_id, "deleted": True}
-    else:
-        raise HTTPException(status_code=400, detail="decision must be 'approve' or 'reject'")
+    # payload.decision == "reject" (the Literal type guarantees nothing else gets here)
+    hospital_of_record = record.hospital_id
+    db.delete(record)
+    db.commit()
+    audit_event("vitals.review", "success", request=request, actor_user_id=current_user.id,
+                actor_role=current_user.role, hospital_id=hospital_of_record,
+                record_id=record_id, decision="reject")
+    return {"id": record_id, "deleted": True}
 
 
 # ---------- Vitals export (Module 3 wiring) ----------
@@ -681,14 +821,21 @@ def review_flagged_vitals(
 # module3-fedlearning/real_data.py calls to pull a hospital's validated
 # vitals instead of synthetic data. Only ever returns what's already been
 # through Module 2's checks; never raw unvalidated uploads.
+#
+# Tenant isolation: the credential is a signed token that names ONE
+# hospital (see service_auth.py / mint_service_token.py). The hospital_id
+# query parameter is only honoured if it equals the hospital in the token;
+# any other value is a 403 and an audit event. There is no "all hospitals"
+# export credential.
 
 @app.get("/vitals/export", response_model=list[StoredVitalsOut])
 def export_vitals(
     hospital_id: str,
+    request: Request,
     include_flagged: bool = False,
     labeled_only: bool = True,
     db: Session = Depends(get_db),
-    _=Depends(auth.require_module3_service_key),
+    claims: dict = Depends(auth.require_export_credential),
 ):
     """
     BREAKING DEFAULT CHANGE (Sprint A): `labeled_only` defaults to **True**.
@@ -703,12 +850,72 @@ def export_vitals(
     real_data.py only does that when its own --allow-placeholder-labels
     flag is set, and it prints a loud banner when it happens.
     """
-    query = db.query(models.VitalsRecord).filter(models.VitalsRecord.hospital_id == hospital_id)
+    token_hospital = service_auth.hospital_scope(claims)
+    if not token_hospital or token_hospital == service_auth.ANY_HOSPITAL or token_hospital != hospital_id:
+        audit_event("vitals.export", "denied", request=request, actor_service=claims.get("sub"),
+                    reason="cross_tenant", requested_hospital_id=hospital_id,
+                    token_hospital_id=token_hospital)
+        raise HTTPException(status_code=403, detail="Credential is not authorized for this hospital")
+
+    query = db.query(models.VitalsRecord).filter(models.VitalsRecord.hospital_id == token_hospital)
     if not include_flagged:
         query = query.filter(models.VitalsRecord.validation_status == "passed")
     if labeled_only:
         query = query.filter(models.VitalsRecord.label.isnot(None))
-    return query.all()
+    rows = query.all()
+    audit_event("vitals.export", "success", request=request, actor_service=claims.get("sub"),
+                hospital_id=token_hospital, count=len(rows))
+    return rows
+
+
+# ---------- Stored-record read access (dashboard record picker, Module 8) ----------
+# Registered AFTER /vitals/flagged and /vitals/export so the fixed paths win
+# over the /vitals/{record_id} pattern.
+
+@app.get("/vitals", response_model=list[StoredVitalsOut])
+def list_vitals(
+    request: Request,
+    validation_status: Optional[Literal["passed", "flagged"]] = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """The caller's own hospital's stored records (ordered by patient_ref,
+    capped at 500). Same scoping rule as /vitals/flagged: the hospital comes from the
+    JWT, never from a parameter."""
+    if not current_user.hospital_id:
+        raise HTTPException(status_code=400, detail="Only hospital-scoped users can list vitals")
+    query = db.query(models.VitalsRecord).filter(models.VitalsRecord.hospital_id == current_user.hospital_id)
+    if validation_status:
+        query = query.filter(models.VitalsRecord.validation_status == validation_status)
+    limit = max(1, min(limit, 500))
+    rows = query.order_by(models.VitalsRecord.patient_ref).limit(limit).all()
+    audit_event("vitals.list", "success", request=request, actor_user_id=current_user.id,
+                actor_role=current_user.role, hospital_id=current_user.hospital_id, count=len(rows))
+    return rows
+
+
+@app.get("/vitals/{record_id}", response_model=StoredVitalsOut)
+def get_vitals_record(
+    record_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """One stored record. 404 if it doesn't exist; 403 (and an audit event)
+    if it belongs to another hospital. Module 8 calls this with the user's
+    own JWT — it holds no service credential for record access."""
+    record = db.query(models.VitalsRecord).filter(models.VitalsRecord.id == record_id).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    if current_user.role != models.Role.SUPER_ADMIN and record.hospital_id != current_user.hospital_id:
+        audit_event("cross_tenant.attempt", "denied", request=request, actor_user_id=current_user.id,
+                    actor_role=current_user.role, hospital_id=current_user.hospital_id,
+                    target_hospital_id=record.hospital_id, record_id=record_id)
+        raise HTTPException(status_code=403, detail="Not permitted for this hospital's records")
+    audit_event("vitals.read", "success", request=request, actor_user_id=current_user.id,
+                actor_role=current_user.role, hospital_id=record.hospital_id, record_id=record_id)
+    return record
 
 
 # ---------- Training status — real, backed by stored vitals ----------

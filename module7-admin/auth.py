@@ -21,16 +21,21 @@ Two separate trust boundaries, on purpose:
    enough for "only our own services can write to this table" at
    prototype stage, not a substitute for that later.
 """
-import os
+import hmac
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 
-SECRET_KEY = os.environ.get("FEDMED_JWT_SECRET", "dev-only-change-me")
+import config
+from audit import audit_event
+
+# Real values are REQUIRED in staging/production (startup fails otherwise);
+# development/test fall back to dev-only values. See config.py.
+SECRET_KEY = config.get_secret("FEDMED_JWT_SECRET", dev_default="dev-only-change-me")
 ALGORITHM = "HS256"
-MODULE2_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M2_M7", "dev-only-key-module2-to-module7")
-MODULE3_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M7", "dev-only-key-module3-to-module7")
+MODULE2_SERVICE_KEY = config.get_secret("FEDHEAL_SVC_KEY_M2_M7", dev_default="dev-only-key-module2-to-module7")
+MODULE3_SERVICE_KEY = config.get_secret("FEDHEAL_SVC_KEY_M3_M7", dev_default="dev-only-key-module3-to-module7")
 
 # Same cookie name Module 1 sets on login — browsers send cookies by host,
 # not by port, so the dashboard's session cookie (set by Module 1 on :8001)
@@ -38,6 +43,15 @@ MODULE3_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M7", "dev-only-key-modu
 TOKEN_COOKIE_NAME = "fedheal_token"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="http://localhost:8001/token", auto_error=False)
+
+
+def get_raw_token(request: Request, token: str | None = Depends(oauth2_scheme)) -> str | None:
+    """The caller's Bearer token, or — for the browser dashboard, which
+    authenticates by httpOnly cookie — the cookie's value. Used when this
+    service forwards the caller's own credential to Module 1: passing only
+    the Bearer header (None for cookie sessions) made those forwards go out
+    as "Bearer None"."""
+    return token or request.cookies.get(TOKEN_COOKIE_NAME)
 
 
 def require_super_admin(request: Request, token: str | None = Depends(oauth2_scheme)) -> dict:
@@ -48,22 +62,34 @@ def require_super_admin(request: Request, token: str | None = Depends(oauth2_sch
     )
     token = token or request.cookies.get(TOKEN_COOKIE_NAME)
     if token is None:
+        audit_event("authn.failure", "denied", request=request, reason="missing_credentials",
+                    level=20)
         raise unauthorized
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
+        audit_event("authn.failure", "denied", request=request, reason="invalid_or_expired_token")
         raise unauthorized
 
     if payload.get("role") != "super_admin":
+        audit_event("authz.denied", "denied", request=request, actor_user_id=payload.get("sub"),
+                    actor_role=payload.get("role"), hospital_id=payload.get("hospital_id"),
+                    required_roles="super_admin")
         raise HTTPException(status_code=403, detail="Requires super_admin role")
     return payload
 
 
-def require_module2_service_key(x_service_key: str | None = Header(default=None)) -> None:
-    if x_service_key != MODULE2_SERVICE_KEY:
+def _check_service_key(request: Request, presented: str | None, expected: str, caller: str) -> None:
+    # Constant-time comparison; a missing header never matches.
+    if presented is None or not hmac.compare_digest(presented.encode("utf-8"), expected.encode("utf-8")):
+        audit_event("service_authn.failure", "denied", request=request, actor_service=caller,
+                    reason="invalid_service_key")
         raise HTTPException(status_code=401, detail="Missing or invalid service key")
 
 
-def require_module3_service_key(x_service_key: str | None = Header(default=None)) -> None:
-    if x_service_key != MODULE3_SERVICE_KEY:
-        raise HTTPException(status_code=401, detail="Missing or invalid service key")
+def require_module2_service_key(request: Request, x_service_key: str | None = Header(default=None)) -> None:
+    _check_service_key(request, x_service_key, MODULE2_SERVICE_KEY, "module2")
+
+
+def require_module3_service_key(request: Request, x_service_key: str | None = Header(default=None)) -> None:
+    _check_service_key(request, x_service_key, MODULE3_SERVICE_KEY, "module3")

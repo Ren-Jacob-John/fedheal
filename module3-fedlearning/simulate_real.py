@@ -14,8 +14,9 @@ Prerequisites (this is real integration, not a standalone demo):
   3. At least 2 hospitals registered in Module 1, each with >= MIN_RECORDS
      validated vitals uploaded (via the dashboard's upload form, or curl
      against POST /vitals/upload — see module1-auth/README.md)
-  4. Same FEDHEAL_SVC_KEY_M3_M1 exported here as Module 1's
-     FEDHEAL_SVC_KEY_M3_M1, so GET /vitals/export authenticates.
+  4. FEDHEAL_SVC_SIGNING_KEY_M3_M1 exported here, equal to Module 1's, so
+     this operator tool can mint a per-hospital token for each
+     GET /vitals/export (operator-only key: never on a hospital machine).
 
 If fewer than 2 hospitals have enough data yet, this exits with instructions
 rather than silently falling back to synthetic data — pretending real
@@ -28,6 +29,7 @@ import sys
 import httpx
 import numpy as np
 
+import config
 from client import HospitalClient
 from fedavg import federated_average, run_local_only_baseline
 from data import train_test_split_per_hospital
@@ -43,7 +45,9 @@ MIN_RECORDS = 10
 N_ROUNDS = 8
 
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
-ADMIN_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M7", "iamgodofdeath")
+# Module 3 -> Module 7 round reports. Required in staging/production; the
+# dev-only fallback matches Module 7's own dev fallback.
+ADMIN_SERVICE_KEY = config.get_secret("FEDHEAL_SVC_KEY_M3_M7", dev_default="dev-only-key-module3-to-module7")
 
 
 def parse_args() -> argparse.Namespace:

@@ -962,3 +962,34 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Synthesis view: model status / warnings (integration pass) --- */
+.synth-badge--ok {
+  color: var(--green, #34d399);
+  background: rgba(52, 211, 153, 0.14);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+}
+.synth-badge--info {
+  color: var(--text-dim, #9aa4b2);
+  background: rgba(154, 164, 178, 0.12);
+  border: 1px solid rgba(154, 164, 178, 0.35);
+}
+.synth-status__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.synth-warning {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: var(--amber);
+  background: rgba(245, 179, 66, 0.12);
+  border: 1px solid rgba(245, 179, 66, 0.4);
+  font-size: 0.9rem;
+}
+.synth-warning p,
+.synth-warning ul { margin: 6px 0 0; }
+.synth-inputs { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.synth-inputs td { padding: 4px 8px 4px 0; }

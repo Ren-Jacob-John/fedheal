@@ -57,12 +57,21 @@ BREAST_CANCER_GENE_PANEL = [f"gene_{i}" for i in range(20)]  # placeholder panel
 LEUKEMIA_GENE_PANEL = [f"gene_{i}" for i in range(20)]        # placeholder panel — swap for a real leukemia subtyping panel
 
 
+def _mark_synthetic_demo(model) -> None:
+    """These are fitted on rng.normal noise with a made-up rule. They exercise
+    the pipeline; they are not clinical models, and say so in their status card."""
+    model.training_status = "synthetic_demo"
+    model.model_version = "synthetic-demo"
+    model.is_fallback = True
+
+
 def _make_synthetic_genomic_model(name: str, class_labels: list[str], seed: int) -> GenomicExpressionModel:
     rng = np.random.default_rng(seed)
     X = rng.normal(size=(200, len(BREAST_CANCER_GENE_PANEL)))
     y = (X[:, 0] - X[:, 5] + X[:, 12] > 0).astype(int)
     model = GenomicExpressionModel(name=name, gene_names=BREAST_CANCER_GENE_PANEL, class_labels=class_labels)
     model.fit(X, y)
+    _mark_synthetic_demo(model)
     return model
 
 
@@ -72,6 +81,7 @@ def _make_synthetic_cbc_model(seed: int) -> LeukemiaCBCModel:
     y = (X[:, 4] + X[:, 0] - X[:, 2] > 0.5).astype(int)  # blast% + wbc - platelets, roughly
     model = LeukemiaCBCModel()
     model.fit(X, y)
+    _mark_synthetic_demo(model)
     return model
 
 

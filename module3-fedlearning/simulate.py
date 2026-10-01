@@ -27,6 +27,7 @@ import os
 import httpx
 import numpy as np
 
+import config
 from client import HospitalClient
 from data import load_full_dataset, partition_for_hospitals, train_test_split_per_hospital
 from model import build_model, get_model_parameters
@@ -39,7 +40,9 @@ N_ROUNDS = 8
 # admin service is up. We're only ever sending round number / hospital
 # count / accuracy numbers here, never any training data.
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
-ADMIN_SERVICE_KEY = os.environ.get("FEDHEAL_SVC_KEY_M3_M7", "iamgodofdeath")
+# Module 3 -> Module 7 round reports. Required in staging/production; the
+# dev-only fallback matches Module 7's own dev fallback.
+ADMIN_SERVICE_KEY = config.get_secret("FEDHEAL_SVC_KEY_M3_M7", dev_default="dev-only-key-module3-to-module7")
 
 
 def report_round_to_admin(round_number: int, n_hospitals: int,

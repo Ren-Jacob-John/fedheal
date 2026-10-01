@@ -64,6 +64,13 @@ Interactive API docs: `http://localhost:8002/docs`
 **Endpoints:**
 - `POST /validate/vitals` — validate a JSON batch of records.
 - `POST /validate/vitals/csv` — validate a CSV file upload.
+
+**Access:** both `/validate/*` endpoints are **internal** — only Module 1
+calls them, sending a short-lived service token scoped to the uploading
+hospital in `X-Service-Key` (401 if missing/forged/expired, 403 if the token
+is for another service or another hospital than the request names). Browsers
+never reach this service and no CORS is granted. Requests over the size /
+record-count limits get 413. See `docs/SECURITY.md`.
 - `GET /health` — liveness check.
 
 This service has no database of its own and no required environment

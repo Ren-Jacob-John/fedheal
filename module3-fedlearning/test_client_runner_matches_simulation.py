@@ -53,17 +53,18 @@ MODULE1_DIR = Path(__file__).parent.parent / "module1-auth"
 MODULE3_DIR = Path(__file__).parent
 AUTH_PORT = 8001
 FL_PORT = 8080
-SVC_KEY = "dev-only-key-module3-to-module1-selftest"
+SVC_KEY = "dev-only-signing-key-module3-to-module1-selftest"
 
-# real_data.py reads FEDHEAL_AUTH_API_URL / FEDHEAL_SVC_KEY_M3_M1 as
+# real_data.py reads FEDHEAL_AUTH_API_URL / FEDHEAL_SVC_SIGNING_KEY_M3_M1 as
 # MODULE-LEVEL constants at import time (same pattern client_runner.py
 # relies on env vars for, but there it's a fresh subprocess each time so
 # order never mattered). This script's in-process reproduction step calls
 # real_data functions directly in THIS process, so these have to be set
 # before the import below — setting os.environ afterward would be too
 # late, real_data.SERVICE_KEY would already be bound to the default.
+os.environ["FEDHEAL_ENV"] = "development"  # local throwaway run
 os.environ["FEDHEAL_AUTH_API_URL"] = f"http://localhost:{AUTH_PORT}"
-os.environ["FEDHEAL_SVC_KEY_M3_M1"] = SVC_KEY
+os.environ["FEDHEAL_SVC_SIGNING_KEY_M3_M1"] = SVC_KEY
 
 from client import HospitalClient
 from model import build_model, get_model_parameters
@@ -161,7 +162,7 @@ def run_real_networked_path(hospital_ids, n_records, rounds, workdir: Path) -> f
 
     client_env = os.environ.copy()
     client_env["FEDHEAL_AUTH_API_URL"] = f"http://localhost:{AUTH_PORT}"
-    client_env["FEDHEAL_SVC_KEY_M3_M1"] = SVC_KEY
+    client_env["FEDHEAL_SVC_SIGNING_KEY_M3_M1"] = SVC_KEY
 
     for idx, hid in enumerate(hospital_ids):
         log = open(workdir / f"client_{idx}.log", "w")
@@ -246,7 +247,7 @@ def main():
         print(f"=== starting Module 1 (throwaway SQLite at {db_path}) ===")
         auth_env = os.environ.copy()
         auth_env["FEDHEAL_DATABASE_URL"] = f"sqlite:///{db_path}"
-        auth_env["FEDHEAL_SVC_KEY_M3_M1"] = SVC_KEY
+        auth_env["FEDHEAL_SVC_SIGNING_KEY_M3_M1"] = SVC_KEY
         auth_log = open(workdir / "module1.log", "w")
         auth_proc = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "main:app",

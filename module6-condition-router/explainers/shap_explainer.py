@@ -7,13 +7,22 @@ per-PREDICTION (this patient, this case) rather than a single global
 importance ranking, which is the more clinically useful form of "reason."
 """
 import numpy as np
-import shap
+
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except (ImportError, OSError):  # pragma: no cover - exercised by tests via monkeypatch
+    shap = None
+    SHAP_AVAILABLE = False
 
 from explainers.base import Explainer, Explanation
 
 
 class ShapExplainer(Explainer):
     name = "shap"
+
+    def is_available(self) -> bool:
+        return SHAP_AVAILABLE
 
     def explain(self, specialist, case: dict, prediction) -> Explanation:
         underlying_model = getattr(specialist, "model", None)
@@ -39,24 +48,38 @@ class ShapExplainer(Explainer):
         else:
             contributions = shap_values[0] if shap_values.ndim > 1 else shap_values
 
-        feature_names = getattr(specialist, "gene_names", None) or _default_feature_names(specialist)
-        contribution_dict = dict(zip(feature_names, np.ravel(contributions).tolist()))
+        # Names come ONLY from the specialist's declared contract. If they can't
+        # be matched one-to-one with the contributions there is no honest
+        # explanation to give: raise (the router records it as unavailable)
+        # rather than zip-truncate or invent generic names.
+        feature_names = getattr(specialist, "gene_names", None) or getattr(specialist, "feature_names", None)
+        flat = np.ravel(contributions)
+        if not feature_names or len(feature_names) != len(flat):
+            raise ValueError(
+                f"{specialist.name}: cannot label SHAP values — declared feature names "
+                f"({0 if not feature_names else len(feature_names)}) do not match the "
+                f"{len(flat)} contributions"
+            )
+        contribution_dict = dict(zip(feature_names, flat.tolist()))
         top_features = sorted(contribution_dict.items(), key=lambda kv: abs(kv[1]), reverse=True)[:3]
 
-        summary = "Top contributing factors: " + ", ".join(
-            f"{name} ({'+' if val >= 0 else ''}{val:.3f})" for name, val in top_features
+        summary = (
+            "Top contributing factors (toward the positive-class output): " + ", ".join(
+                f"{name} ({'+' if val >= 0 else ''}{val:.3f})" for name, val in top_features
+            )
         )
 
         return Explanation(
             method=self.name,
             summary=summary,
             details=contribution_dict,
+            metadata={
+                "data_driven": True,
+                "feature_names": list(feature_names),
+                # TreeExplainer on a binary XGBoost model returns log-odds
+                # contributions toward the POSITIVE class, whatever class was predicted.
+                "explained_output": "log-odds of the positive class",
+                "predicted_label": prediction.label,
+            },
         )
 
-
-def _default_feature_names(specialist) -> list[str]:
-    # Falls back to generic names if the specialist doesn't expose real ones —
-    # every specialist SHOULD expose FEATURE_NAMES/gene_names for this to be
-    # genuinely readable; see leukemia_cbc.py and tabular_vitals.py for the pattern.
-    module = __import__(specialist.__class__.__module__, fromlist=["FEATURE_NAMES"])
-    return getattr(module, "FEATURE_NAMES", [f"feature_{i}" for i in range(20)])

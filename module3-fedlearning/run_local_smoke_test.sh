@@ -21,7 +21,8 @@ RECORDS_PER_HOSPITAL=20
 ROUNDS=8
 AUTH_PORT=8001
 FL_PORT=8080
-SVC_KEY="dev-only-key-module3-to-module1-smoketest"
+SVC_KEY="dev-only-signing-key-module3-to-module1-smoketest"
+export FEDHEAL_ENV=development   # local throwaway run; staging/production refuse dev fallbacks
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -58,7 +59,7 @@ echo "=== 1/5: starting Module 1 (throwaway SQLite at $DB_PATH) ==="
 (
   cd "$MODULE1_DIR" || exit 1
   export FEDHEAL_DATABASE_URL="sqlite:///$DB_PATH"
-  export FEDHEAL_SVC_KEY_M3_M1="$SVC_KEY"
+  export FEDHEAL_SVC_SIGNING_KEY_M3_M1="$SVC_KEY"
   exec uvicorn main:app --host 0.0.0.0 --port "$AUTH_PORT"
 ) > "$WORKDIR/module1.log" 2>&1 &
 PIDS+=($!)
@@ -149,7 +150,7 @@ for idx in "${!ID_ARRAY[@]}"; do
   (
     cd "$SCRIPT_DIR" || exit 1
     export FEDHEAL_AUTH_API_URL="http://localhost:$AUTH_PORT"
-    export FEDHEAL_SVC_KEY_M3_M1="$SVC_KEY"
+    export FEDHEAL_SVC_SIGNING_KEY_M3_M1="$SVC_KEY"
     exec python3 client_runner.py --hospital-id "$hid" --server "localhost:$FL_PORT" \
       --min-records "$RECORDS_PER_HOSPITAL"
   ) > "$log" 2>&1 &

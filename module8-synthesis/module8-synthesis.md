@@ -85,7 +85,7 @@ imports across services. See "HTTP surface" below.
 - **Imports:** Module 6 (`ConditionReport`, `ConditionRouter`,
   `resolve_condition`) and Module 5 (`FusedAssessment`).
 - **Depended on by:** Module 4 (dashboard) — its Synthesis view calls
-  `POST /synthesize/heart_disease` to render a `SynthesisReport` in the
+  `POST /synthesize/record` to render a `SynthesisReport` in the
   browser (Sprint B; see `module4-dashboard-react/module4-dashboard-react.md`).
 
 ## HTTP surface (new in Sprint B)
@@ -98,34 +98,42 @@ genuinely real end-to-end today (per `docs/DEVELOPMENT_PLAN.md`'s own
 instruction to scope the first version to "the minimum that makes the
 vitals→SHAP→synthesis story demoable"):
 
-- `POST /synthesize/heart_disease` — body `{"features": [8 floats]}` in
-  `tabular_vitals.FEATURE_NAMES` order (age, resting_bp, cholesterol,
-  max_heart_rate, bmi, glucose, num_medications, prior_admissions).
-  Routes through Module 6's `heart_disease` condition (the `vitals`
-  specialist — XGBoost or TabPFN, whichever module5's registry picked —
-  plus the SHAP and knowledge-graph explainers), builds a
-  `SynthesisReport`, and returns `report.to_dict()`.
-- `GET /health` — same shape as every other module.
+- `POST /synthesize/record` — body `{"record_id": "...", "condition": "heart_disease"}`.
+  Reads the stored record from Module 1 **as the calling user** (their own
+  token is forwarded; this service holds no credential for it), requires
+  `validation_status == "passed"`, maps it to the model's inputs through
+  `feature_mapper.py`, routes it through Module 6 (specialist selection,
+  required-input validation, SHAP) and returns `record`, `inputs`,
+  `specialist`/`model` status (`is_stub`, `is_fallback`, `training_status`,
+  `model_version`), `prediction`, `explanation` (`available`|`unavailable`),
+  `warnings`, and the `synthesis` report. Every non-success outcome is an
+  explicit structured error (`incomplete_data`, `record_not_validated`,
+  `unknown_condition`, `unsupported_input`, `specialist_unavailable`, ...) —
+  see **`docs/DATA_CONTRACT.md`** for the table and the field mapping.
+- `GET /models/status?condition=...` — what would run for a condition and
+  how real each piece is (stub / fallback / training status).
+- `GET /health` — `{"status": "ok", "service": "module8-synthesis"}`.
+- `POST /synthesize/heart_disease` — **retired (410)**. It took 8 hand-typed
+  numbers in a legacy feature space that matched no stored data.
 
 Requires a valid FedHeal session (any logged-in hospital user, not just
-super_admin — this is a per-case decision-support tool, not an admin
-action) via the same JWT/cookie Module 1 issues; see `auth.py`.
+super_admin) via the same JWT/cookie Module 1 issues; see `auth.py`.
 
-The `vitals` specialist has no persisted weights yet (nothing in this
-project does — see Module 3/5's own status notes), so `main.py` fits it
-once at process startup on the same synthetic distribution `demo.py`
-already uses, purely so the endpoint has something to predict with. This
-is explicitly a placeholder for "a hospital's actual locally-trained
-model" and is called out as such in `main.py`'s docstring — swapping in
-a real fitted model (e.g. the one module3-fedlearning trains) is a
-follow-on, not something this endpoint pretends to already do.
+**The model is a labelled demo fallback, not a federated model.** Module 3
+does not export a global model, so there is nothing to load. `model_provider.py`
+fits the vitals specialist on the vendored public UCI Cleveland data (in
+Module 1's schema; only 3 of the 8 features carry real values there) and
+reports it as `training_status="demo_fit"`, `is_fallback=true`,
+`federated=false`. It is on by default in development/test and must be
+enabled explicitly (`FEDHEAL_ALLOW_DEMO_MODEL=true`) elsewhere; when off the
+endpoint answers 503. (The earlier fit on `numpy.random.normal` noise at
+import is gone.) Integrating Module 3 later is a change confined to
+`model_provider.py`.
 
-Not yet wired for any other condition — every other `ConditionSpec` in
-`conditions.py` routes to an imaging/genomic specialist that's still a
-labeled stub (Module 5), so a synthesis report for those would have
-nothing real to show yet. Extending `/synthesize/{condition}` to the
-general case is straightforward (the router/registry already support
-any condition) once a second specialist graduates out of stub mode.
+Only conditions whose specialists are all `vitals` can be driven from a
+Module 1 record (`heart_disease`); the rest need imaging/genomic/CBC inputs
+a vitals record does not contain and answer `unsupported_input`, with the
+stub/fallback status of their specialists.
 
 ## Known limitations / current status
 

@@ -10,13 +10,16 @@ can't run arbitrary model inference through this service for free, and
 every request is attributable to a real user if this ever needs an audit
 trail (e.g. "who ran a synthesis on this case, and when").
 """
-import os
-
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 
-SECRET_KEY = os.environ.get("FEDMED_JWT_SECRET", "dev-only-change-me")
+import config
+from audit import audit_event
+
+# Required in staging/production (startup fails otherwise); dev/test fall
+# back to a dev-only value. See config.py.
+SECRET_KEY = config.get_secret("FEDMED_JWT_SECRET", dev_default="dev-only-change-me")
 ALGORITHM = "HS256"
 
 # Same cookie name Module 1 sets on login — browsers send cookies by host,
@@ -36,9 +39,19 @@ def require_authenticated_user(request: Request, token: str | None = Depends(oau
     )
     token = token or request.cookies.get(TOKEN_COOKIE_NAME)
     if token is None:
+        audit_event("authn.failure", "denied", request=request, reason="missing_credentials", level=20)
         raise unauthorized
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
+        audit_event("authn.failure", "denied", request=request, reason="invalid_or_expired_token")
         raise unauthorized
     return payload
+
+
+def get_raw_token(request: Request, token: str | None = Depends(oauth2_scheme)) -> str | None:
+    """The caller's own token (Bearer header, or the dashboard's httpOnly
+    cookie). Module 8 forwards it to Module 1 to read a record: record
+    access is decided by the user's own tenant, and this service holds no
+    credential of its own for it."""
+    return token or request.cookies.get(TOKEN_COOKIE_NAME)
