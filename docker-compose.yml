@@ -1,0 +1,74 @@
+# Full local stack. DRAFT (Sprint C): validated as YAML, not yet built/run in
+# an environment with Docker. Usage:
+#   cp deploy/compose.env.example .env   # then replace every CHANGE_ME
+#   docker compose up --build
+# Every secret is required (":?"); compose refuses to start with one unset.
+x-common: &common
+  restart: unless-stopped
+  env_file: .env
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fedheal
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: fedheal
+    volumes: [dbdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fedheal"]
+      interval: 5s
+      retries: 10
+
+  auth:            # Module 1 (runs `alembic upgrade head` on start)
+    <<: *common
+    build: {context: ., dockerfile: module1-auth/Dockerfile}
+    environment:
+      FEDHEAL_DATABASE_URL: postgresql://fedheal:${POSTGRES_PASSWORD}@db:5432/fedheal
+      FEDHEAL_VALIDATION_API_URL: http://validation:8002
+    depends_on: {db: {condition: service_healthy}}
+    ports: ["8001:8001"]
+
+  validation:      # Module 2
+    <<: *common
+    build: {context: ., dockerfile: module2-validation/Dockerfile}
+    environment:
+      FEDHEAL_ADMIN_API_URL: http://admin:8005
+    ports: ["8002:8002"]
+
+  admin:           # Module 7
+    <<: *common
+    build: {context: ., dockerfile: module7-admin/Dockerfile}
+    environment:
+      FEDHEAL_DATABASE_URL: postgresql://fedheal:${POSTGRES_PASSWORD}@db:5432/fedheal
+      FEDMED_AUTH_API_URL: http://auth:8001
+    depends_on: {db: {condition: service_healthy}}
+    ports: ["8005:8005"]
+
+  synthesis:       # Module 8 (Modules 5 and 6 are bundled into this image)
+    <<: *common
+    build: {context: ., dockerfile: module8-synthesis/Dockerfile}
+    environment:
+      FEDHEAL_AUTH_API_URL: http://auth:8001
+    ports: ["8006:8006"]
+
+  fl-server:       # Module 3 Flower server; plaintext gRPC, LAN/localhost only (no TLS yet)
+    <<: *common
+    profiles: [federation]
+    build: {context: ., dockerfile: module3-fedlearning/Dockerfile}
+    ports: ["8080:8080"]
+
+  dashboard:       # Module 4; VITE_* URLs are baked in at build time
+    build:
+      context: .
+      dockerfile: module4-dashboard-react/Dockerfile
+      args:
+        VITE_AUTH_API_BASE: ${PUBLIC_AUTH_URL:-http://localhost:8001}
+        VITE_ADMIN_API_BASE: ${PUBLIC_ADMIN_URL:-http://localhost:8005}
+        VITE_SYNTHESIS_API_BASE: ${PUBLIC_SYNTHESIS_URL:-http://localhost:8006}
+    restart: unless-stopped
+    ports: ["5173:80"]
+
+volumes:
+  dbdata:

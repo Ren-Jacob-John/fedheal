@@ -122,7 +122,9 @@ schedule slack the other weeks can borrow.
   available, XGBoost fallback per module5-modelzoo/registry.py) — real
   SHAP contributions, not mocked data.*
 
-### Sprint C — Sep 28 to Oct 4 (finish week 14, start week 15)
+### Sprint C — Sep 28 to Oct 4 (finish week 14, start week 15) — ✅ CODE-COMPLETE
+
+> Outcome, audit and open items: **`docs/SPRINT-C-REPORT.md`**. Docker/compose are drafted but not yet built or run.
 
 > **Integration pass (done before Sprint C work):** the vitals specialist now
 > consumes Module 1's stored schema through an explicit mapper, with
