@@ -19,6 +19,11 @@ export default function TopHUD({ me, overview, view, onSetView, onLogout, onRefr
         <button className={view === "system" ? "is-active" : ""} onClick={() => onSetView("system")}>
           Architecture
         </button>
+        {me.role !== "super_admin" && (
+          <button className={view === "cases" ? "is-active" : ""} onClick={() => onSetView("cases")}>
+            {me.role === "hospital_admin" ? "Doctors" : "Cases"}
+          </button>
+        )}
         <button className={view === "synthesis" ? "is-active" : ""} onClick={() => onSetView("synthesis")}>
           Synthesis
         </button>

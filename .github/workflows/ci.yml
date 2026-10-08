@@ -6,7 +6,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [module1-auth, module2-validation, module5-modelzoo, module6-condition-router, module7-admin, module8-synthesis]
+        module: [module1-auth, module2-validation, module3-fedlearning, module5-modelzoo, module6-condition-router, module7-admin, module8-synthesis]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,7 +27,7 @@ jobs:
         with: {python-version: "3.12"}
       - run: |
           pip install pytest
-          for m in module1-auth module2-validation module8-synthesis; do pip install -r $m/requirements.txt; done
+          for m in module1-auth module2-validation module3-fedlearning module7-admin module8-synthesis; do pip install -r $m/requirements.txt; done
       - run: python -m pytest -q tests
         env: {FEDHEAL_ENV: development}
   dashboard:

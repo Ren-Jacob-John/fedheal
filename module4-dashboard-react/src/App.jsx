@@ -7,6 +7,7 @@ import RoundsRail from "./components/RoundsRail.jsx";
 import DetailDrawer from "./components/DetailDrawer.jsx";
 import SystemMap from "./components/SystemMap.jsx";
 import SynthesisView from "./components/SynthesisView.jsx";
+import CasesView from "./components/CasesView.jsx";
 
 const POLL_MS = 12000;
 
@@ -242,6 +243,8 @@ export default function App() {
         </>
       ) : view === "system" ? (
         <SystemMap />
+      ) : view === "cases" ? (
+        <CasesView token={token} me={me} />
       ) : (
         <SynthesisView token={token} />
       )}

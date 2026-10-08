@@ -34,6 +34,7 @@ from client import HospitalClient
 from fedavg import federated_average, run_local_only_baseline
 from data import train_test_split_per_hospital
 from model import build_model, get_model_parameters
+import federation_registry
 from real_data import (
     load_real_partitions,
     carve_global_holdout,
@@ -180,6 +181,32 @@ def main():
 
         print(f"{round_num:>5} | {global_acc:>36.3f}")
         report_round_to_admin(round_num, len(clients), global_acc, baseline_acc, notes=round_notes)
+
+    # --- Candidate registration (Module 7). Aggregates + weight hash only; deploys nothing. ---
+    try:
+        per_hospital = {}
+        for name, client in zip(hospital_names, clients):
+            _, n_local, m = client.evaluate(global_params, {})
+            per_hospital[name] = m["accuracy"]
+        majority = float(max(np.mean(y_global_holdout), 1 - np.mean(y_global_holdout)))
+        path, digest = federation_registry.export_artifact(
+            global_params, os.environ.get("FEDHEAL_MODEL_STORAGE_PATH", "./model_artifacts"))
+        payload = federation_registry.build_candidate_payload(
+            condition="heart_disease", training_round=N_ROUNDS, hospital_labels=list(hospital_names),
+            global_accuracy=global_acc, n_eval=len(y_global_holdout), per_hospital_accuracy=per_hospital,
+            local_only_baseline=baseline_acc, majority_class_floor=majority, digest=digest,
+            provenances=provenances, data_source="hospital_validated_vitals_via_module1")
+        stored = federation_registry.register_candidate(payload)
+        if stored is None:
+            print("\nModule 7 unreachable: candidate NOT registered (weights saved at "
+                  f"{path}, sha256 {digest[:12]}...).")
+        elif "error" in stored:
+            print(f"\nModule 7 refused the candidate: {stored}")
+        else:
+            print(f"\nRegistered candidate {stored['version']} (status {stored['deployment_status']}) with "
+                  "Module 7. It is NOT deployed: it must pass validation and be promoted by a super_admin.")
+    except Exception as e:  # registration is best-effort and must never break a training run
+        print(f"\nCandidate registration skipped: {type(e).__name__}")
 
     print(f"\nFinal federated global model accuracy (global holdout): {global_acc:.3f}")
     print(f"Local-only baseline (global holdout):                    {baseline_acc:.3f}")

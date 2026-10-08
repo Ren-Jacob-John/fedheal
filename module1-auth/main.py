@@ -64,7 +64,7 @@ app.add_middleware(
 # the methods/headers the dashboard actually uses against this service.
 app.add_middleware(
     CORSMiddleware,
-    **config.cors_settings(methods=("GET", "POST", "PATCH"), headers=("Authorization", "Content-Type")),
+    **config.cors_settings(methods=("GET", "POST", "PATCH", "PUT"), headers=("Authorization", "Content-Type")),
 )
 
 # ---------- Rate limiting on /token ----------
@@ -185,6 +185,8 @@ class AdminUserCreate(BaseModel):
 class UserOut(BaseModel):
     id: str
     email: str
+    full_name: Optional[str] = None
+    is_active: bool = True
     role: models.Role
     hospital_id: Optional[str]
 
@@ -269,6 +271,9 @@ def get_current_user(
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if user is None:
         audit_event("authn.failure", "denied", request=request, reason="unknown_user")
+        raise credentials_exception
+    if user.is_active is False:
+        audit_event("authn.failure", "denied", request=request, reason="account_disabled")
         raise credentials_exception
     return user
 
@@ -498,6 +503,11 @@ def login(
         raise
 
     user = db.query(models.User).filter(models.User.email == form_data.username).first()
+    if user is not None and user.is_active is False:
+        # Same response as a wrong password: don't reveal that the account exists.
+        audit_event("login", "failure", request=request, reason="account_disabled",
+                    username_hash=hash_identifier(form_data.username))
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
     if not user or not auth.verify_password(form_data.password, user.hashed_password):
         # Never the submitted name/password: a short hash lets repeated
         # attempts against one account be correlated without storing it.
@@ -916,6 +926,17 @@ def get_vitals_record(
     audit_event("vitals.read", "success", request=request, actor_user_id=current_user.id,
                 actor_role=current_user.role, hospital_id=record.hospital_id, record_id=record_id)
     return record
+
+
+# ---------- Cases, medical history, case vitals, clinician review, doctor management ----------
+import cases as _cases  # noqa: E402
+
+app.include_router(_cases.build_router(
+    get_db=get_db, get_current_user=get_current_user, require_role=require_role,
+    validation_api_url=VALIDATION_API_URL, mint_validation_token=auth.mint_validation_token,
+    stored_vitals_out=StoredVitalsOut, label_source=_label_source, check_records=limits.check_records,
+    upload_limits=UPLOAD_LIMITS, http_client_factory=lambda **kw: httpx.AsyncClient(**kw),
+))
 
 
 # ---------- Training status — real, backed by stored vitals ----------

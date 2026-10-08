@@ -376,6 +376,18 @@ with one command.
   registry's safe fallback behavior, not a bug. See those modules'
   `README.md`.
 
+## Clinical workflow MVP (P0) — status and demo
+
+Hospital admin → create doctor → doctor creates a patient case → vitals (validated) → medical history →
+AI analysis (clinical decision support, clinician review required) → clinician review → two-hospital federated
+training → candidate model → validation gate → explicit promotion / rollback.
+
+What is real and what is not, in one place: **docs/MODEL_STATUS.md** (the served model is a labelled
+FALLBACK demo fit on public UCI data and is not clinically validated), **docs/FEDERATED_PRIVACY.md**
+(raw-data isolation is implemented; TLS, clipping, differential privacy and secure aggregation are not),
+**docs/MVP_SCOPE.md** (what is deliberately not done), and **FINAL_IMPLEMENTATION_REPORT.md**.
+Step-by-step demo: **docs/DEMO_RUNBOOK.md**. Tests: **docs/TESTING.md**. API: **docs/API.md**.
+
 ## Algorithms & Frameworks Used
 
 | Layer | Algorithm / Model | Framework / Library |

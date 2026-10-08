@@ -993,3 +993,21 @@
 .synth-warning ul { margin: 6px 0 0; }
 .synth-inputs { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 .synth-inputs td { padding: 4px 8px 4px 0; }
+
+/* ---- Cases / doctor workflow ---- */
+.cases { padding: 96px 20px 32px; max-width: 1100px; margin: 0 auto; display: grid; gap: 16px; }
+.cases__layout { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px; }
+@media (max-width: 760px) { .cases__layout { grid-template-columns: 1fr; } }
+.cases__panel { padding: 16px; border-radius: 14px; }
+.cases__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cases__list button { width: 100%; text-align: left; padding: 10px; border-radius: 10px; cursor: pointer; }
+.cases__list button[aria-current="true"] { outline: 2px solid currentColor; }
+.cases__form { display: grid; gap: 10px; }
+.cases__form label { display: grid; gap: 4px; font-size: 0.85rem; }
+.cases__form input, .cases__form textarea, .cases__form select { padding: 8px; border-radius: 8px; font: inherit; }
+.cases__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.cases__error { color: #ff8a8a; font-size: 0.9rem; }
+.cases__ok { color: #6fe3b0; font-size: 0.9rem; }
+.cases__banner { padding: 10px 12px; border-radius: 10px; border: 1px solid currentColor; font-weight: 600; }
+.cases__modal-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.cases__empty { opacity: 0.7; font-size: 0.9rem; }

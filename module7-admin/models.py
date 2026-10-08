@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Integer, Float, DateTime
+from sqlalchemy import Column, String, Integer, Float, DateTime, JSON
 
 from database import Base
 
@@ -48,3 +48,39 @@ class ValidationFlag(Base):
     reason = Column(String, nullable=False)
     count = Column(Integer, nullable=False, default=1)
     reported_at = Column(DateTime, default=utcnow)
+
+
+class ModelVersion(Base):
+    """
+    Model registry (P0). One row per candidate/deployed global model version.
+
+    Lifecycle:  CANDIDATE -> (validate) -> VALIDATED | REJECTED
+                VALIDATED -> (promote, super_admin) -> DEPLOYED
+                DEPLOYED  -> (new promotion) -> RETIRED
+                DEPLOYED  -> (rollback) -> ROLLED_BACK, previous RETIRED -> DEPLOYED
+    A model is NEVER DEPLOYED merely because training finished.
+
+    Only metadata lives here: ids, hashes, aggregate metrics. No patient data.
+    `metrics` are reported by the training side (Module 3) from its own
+    held-out evaluation; the registry stores and gates them, it does not
+    re-measure them.
+    """
+    __tablename__ = "model_versions"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    model_name = Column(String, nullable=False, index=True)
+    version = Column(String, nullable=False)
+    parent_version = Column(String, nullable=True)
+    condition = Column(String, nullable=False, index=True)
+    training_round = Column(Integer, nullable=False, index=True)
+    participating_hospitals = Column(JSON, nullable=False, default=list)
+    training_metadata = Column(JSON, nullable=False, default=dict)
+    metrics = Column(JSON, nullable=False, default=dict)
+    validation_status = Column(String, nullable=False, default="PENDING")   # PENDING|PASSED|FAILED
+    validation_report = Column(JSON, nullable=True)
+    deployment_status = Column(String, nullable=False, default="CANDIDATE", index=True)
+    replaces_id = Column(String, nullable=True)       # the model this one displaced on promotion
+    artifact_hash = Column(String, nullable=False)
+    created_at = Column(DateTime, default=utcnow, index=True)
+    approved_at = Column(DateTime, nullable=True)
+    approved_by = Column(String, nullable=True)

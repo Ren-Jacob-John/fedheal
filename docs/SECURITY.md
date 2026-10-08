@@ -125,3 +125,19 @@ Events: `hospital.create`, `hospital.update`, `admin.user_create`, `login`
 See the final report of the hardening task; the main ones are listed there
 (open self-registration, static M2→M7 / M3→M7 keys with no tenant scope,
 in-memory login rate limiting, no revocation list for individual tokens).
+
+## P0 clinical-workflow additions (2026-10-06)
+
+| Control | State |
+|---|---|
+| Doctor creation by hospital_admin, own hospital only (foreign `hospital_id` → 403 + audit) | Implemented, tested |
+| Disabled accounts: login refused and existing tokens rejected | Implemented, tested |
+| Cases / history / case vitals / reviews scoped to the caller's hospital; other hospital → 403 + `cross_tenant.attempt` audit | Implemented, tested both directions on every sub-resource |
+| Admins have no patient-level access (cases are `clinician` only) | Implemented, tested |
+| Audit events for case/history/vitals/review/analysis/model lifecycle carry ids only | Implemented, tested (no note/history text in logs) |
+| Input limits on history (50 items × 200 chars, notes 2000), patient_ref pattern | Implemented |
+| Registry refuses raw-data-shaped payloads | Implemented, tested |
+
+Known gaps: open self-registration (`POST /register`) remains; the new case endpoints have no request-size
+middleware entry or rate limiting; no scan upload exists so no upload-validation surface; login/logout
+audit exists but "report viewed" and "case access" for analysis are logged only as `analysis.run`.

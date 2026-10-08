@@ -34,7 +34,8 @@ _ALLOWED_EXTRA = frozenset({
     "target_hospital_id", "requested_hospital_id", "token_hospital_id",
     "caller", "count", "total", "passed", "flagged", "rejected", "stored",
     "is_active", "requires_label", "status_code", "required_roles",
-    "username_hash", "round_number",
+    "username_hash", "round_number", "case_id", "resource_type", "resource_id",
+    "model_version",
 })
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")

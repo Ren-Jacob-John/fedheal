@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Enum, ForeignKey, Boolean, Float, Integer, DateTime
+from sqlalchemy import Column, String, Enum, ForeignKey, Boolean, Float, Integer, DateTime, JSON, Text, Index
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -58,6 +58,13 @@ class User(Base):
     hospital_id = Column(String, ForeignKey("hospitals.id"), nullable=True)
     hospital = relationship("Hospital", back_populates="users")
 
+    # P0 doctor management. `is_active` lets a hospital admin disable a
+    # doctor without deleting their audit trail; a disabled account can
+    # neither log in nor use an already-issued token (see main.get_current_user).
+    full_name = Column(String, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
 
 class VitalsRecord(Base):
     """
@@ -78,6 +85,9 @@ class VitalsRecord(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     hospital_id = Column(String, ForeignKey("hospitals.id"), nullable=False, index=True)
+    # Optional link to a patient Case. Legacy bulk uploads (no case) keep
+    # working unchanged; vitals entered through POST /cases/{id}/vitals carry it.
+    case_id = Column(String, ForeignKey("cases.id"), nullable=True, index=True)
 
     patient_ref = Column(String, nullable=False)
     age_years = Column(Float, nullable=False)
@@ -111,3 +121,70 @@ class VitalsRecord(Base):
 
     validation_status = Column(String, nullable=False, default="passed")  # "passed" | "flagged"
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class CaseStatus(str, enum.Enum):
+    OPEN = "OPEN"
+    REVIEWED = "REVIEWED"
+    NEEDS_MORE_DATA = "NEEDS_MORE_DATA"
+
+
+class Case(Base):
+    """
+    A patient case / encounter: the parent of vitals, medical history and
+    clinician reviews. hospital_id comes from the creating doctor's JWT,
+    never from the request body. `patient_ref` is a synthetic/internal
+    reference (e.g. PAT-DEMO-001), not a real identity.
+    """
+    __tablename__ = "cases"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    hospital_id = Column(String, ForeignKey("hospitals.id"), nullable=False, index=True)
+    patient_ref = Column(String, nullable=False, index=True)
+    encounter_id = Column(String, nullable=False, default=gen_uuid)
+    admission_reason = Column(String, nullable=False)
+    current_condition = Column(String, nullable=True)   # a Module 6 condition key, e.g. "heart_disease"
+    presenting_symptoms = Column(JSON, nullable=False, default=list)
+    status = Column(String, nullable=False, default=CaseStatus.OPEN.value)
+    created_by = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (Index("ix_cases_hospital_created", "hospital_id", "created_at"),)
+
+
+class MedicalHistory(Base):
+    """One structured history per case (upserted). Lists of short strings;
+    only fields the MVP use case justifies."""
+    __tablename__ = "medical_histories"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    case_id = Column(String, ForeignKey("cases.id"), nullable=False, unique=True, index=True)
+    hospital_id = Column(String, ForeignKey("hospitals.id"), nullable=False, index=True)
+    conditions = Column(JSON, nullable=False, default=list)
+    previous_diagnoses = Column(JSON, nullable=False, default=list)
+    surgeries = Column(JSON, nullable=False, default=list)
+    allergies = Column(JSON, nullable=False, default=list)
+    medications = Column(JSON, nullable=False, default=list)
+    family_history = Column(JSON, nullable=False, default=list)
+    previous_admissions = Column(JSON, nullable=False, default=list)
+    symptoms = Column(JSON, nullable=False, default=list)
+    notes = Column(Text, nullable=True)
+    created_by = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+
+class ClinicianReview(Base):
+    """A doctor's decision on an AI result. Never used as a training label."""
+    __tablename__ = "clinician_reviews"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    case_id = Column(String, ForeignKey("cases.id"), nullable=False, index=True)
+    hospital_id = Column(String, ForeignKey("hospitals.id"), nullable=False, index=True)
+    doctor_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    decision = Column(String, nullable=False)   # ACCEPTED | OVERRIDDEN | NEEDS_MORE_DATA
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)

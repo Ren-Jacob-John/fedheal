@@ -154,6 +154,44 @@ export const authApi = {
       body: { decision },
     });
   },
+
+  // ---- Doctor management (hospital_admin only; hospital comes from the session) ----
+  listDoctors(token) {
+    return request(AUTH_API_BASE, "/hospital/doctors", { token });
+  },
+  createDoctor(token, body) {
+    return request(AUTH_API_BASE, "/hospital/doctors", { method: "POST", token, body });
+  },
+  setDoctorActive(token, doctorId, isActive) {
+    return request(AUTH_API_BASE, `/hospital/doctors/${doctorId}`, {
+      method: "PATCH", token, body: { is_active: isActive },
+    });
+  },
+
+  // ---- Patient cases (clinician only; hospital scoping is enforced server-side) ----
+  listCases(token) {
+    return request(AUTH_API_BASE, "/cases", { token });
+  },
+  createCase(token, body) {
+    return request(AUTH_API_BASE, "/cases", { method: "POST", token, body });
+  },
+  getCase(token, caseId) {
+    return request(AUTH_API_BASE, `/cases/${caseId}`, { token });
+  },
+  addCaseVitals(token, caseId, record) {
+    return request(AUTH_API_BASE, `/cases/${caseId}/vitals`, { method: "POST", token, body: { record } });
+  },
+  getHistory(token, caseId) {
+    return request(AUTH_API_BASE, `/cases/${caseId}/history`, { token });
+  },
+  putHistory(token, caseId, body) {
+    return request(AUTH_API_BASE, `/cases/${caseId}/history`, { method: "PUT", token, body });
+  },
+  reviewCase(token, caseId, decision, clinicianNote) {
+    return request(AUTH_API_BASE, `/cases/${caseId}/review`, {
+      method: "POST", token, body: { decision, clinician_note: clinicianNote || null },
+    });
+  },
 };
 
 // ---------- Module 7 — Admin / Platform ----------
@@ -218,5 +256,10 @@ export const synthesisApi = {
       `/models/status?condition=${encodeURIComponent(condition)}`,
       { token }
     );
+  },
+
+  // Case-level analysis: Module 8 reads the case, history and vitals as THIS user.
+  analyzeCase(token, caseId) {
+    return request(SYNTHESIS_API_BASE, `/cases/${caseId}/analyze`, { method: "POST", token });
   },
 };

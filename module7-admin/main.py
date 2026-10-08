@@ -50,6 +50,7 @@ from audit import audit_event
 from auth import get_raw_token, require_module2_service_key, require_module3_service_key, require_super_admin
 from database import Base, engine, get_db
 from docs_theme import mount_custom_docs
+import model_registry
 
 Base.metadata.create_all(bind=engine)
 
@@ -62,6 +63,8 @@ app.add_middleware(
     CORSMiddleware,
     **config.cors_settings(methods=("GET", "POST", "PATCH"), headers=("Authorization", "Content-Type")),
 )
+
+app.include_router(model_registry.build_router())
 
 # Path to Module 3's simulate.py, relative to this file, so /rounds/trigger
 # works regardless of which directory uvicorn was launched from.

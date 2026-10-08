@@ -270,6 +270,194 @@ async def synthesize_record(
     }
 
 
+# ---------------------------------------------------------------------------
+# Case-level analysis (P0): POST /cases/{case_id}/analyze
+#
+# Reads the case, its medical history and its vitals from Module 1 AS THE
+# CALLING USER (Module 1 enforces hospital tenancy: another hospital's case
+# answers 403 there and here). Combines only what exists, says exactly what
+# is missing, and never estimates a missing input.
+#
+# Honesty rules baked into this endpoint:
+#   * Only the vitals specialist exists for record data. Medical history is
+#     shown to the clinician as CONTEXT; it is NOT a model input, and the
+#     response says so. Scans and labs are reported as not supported yet.
+#   * `model.status` is derived from what the specialist actually declares:
+#     UNAVAILABLE / STUB / FALLBACK. This service never reports VALIDATED or
+#     DEPLOYED, because nothing here has passed a registry validation gate.
+#   * No diagnosis, treatment, medication or dosage text is produced.
+# ---------------------------------------------------------------------------
+
+SAFETY_BANNER = "AI Clinical Decision Support \u2014 Not a Diagnosis"
+SAFETY_FOOTER = "Final clinical decisions must be made by a qualified healthcare professional."
+NOT_SUPPORTED_YET = {
+    "scan": "Scan/image analysis is not implemented in this release.",
+    "labs": "Laboratory data is not supported in this release.",
+}
+
+
+async def _m1_get(path: str, token: str | None, *, missing_ok: bool = False):
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{AUTH_API_URL}{path}", headers=headers)
+    except httpx.HTTPError:
+        raise _error(502, "upstream_unreachable", "Could not reach Module 1 (auth/vitals service).")
+    if resp.status_code == 200:
+        return resp.json()
+    if resp.status_code == 404 and missing_ok:
+        return None
+    if resp.status_code in (401, 403, 404):
+        raise _error(resp.status_code, {401: "unauthenticated", 403: "forbidden", 404: "case_not_found"}[resp.status_code],
+                     "Not permitted for this case" if resp.status_code == 403 else "Case not found")
+    raise _error(502, "upstream_error", f"Module 1 answered {resp.status_code}.")
+
+
+async def fetch_case_bundle(case_id: str, token: str | None) -> dict:
+    case = await _m1_get(f"/cases/{case_id}", token)
+    history = await _m1_get(f"/cases/{case_id}/history", token, missing_ok=True)
+    vitals = await _m1_get(f"/cases/{case_id}/vitals", token)
+    return {"case": case, "history": history, "vitals": vitals}
+
+
+def _model_status(card: dict, info) -> str:
+    if info.source == "none" or not card.get("available", False):
+        return "UNAVAILABLE"
+    if card.get("is_stub"):
+        return "STUB"
+    if card.get("is_fallback") or card.get("training_status") == "demo_fit":
+        return "FALLBACK"
+    return "EXPERIMENTAL"
+
+
+@app.post("/cases/{case_id}/analyze")
+async def analyze_case(
+    case_id: str,
+    request: Request,
+    user: dict = Depends(require_authenticated_user),
+    token: str | None = Depends(get_raw_token),
+):
+    bundle = await fetch_case_bundle(case_id, token)
+    case, history, vitals_rows = bundle["case"], bundle["history"], bundle["vitals"]
+    actor = dict(actor_user_id=user.get("sub"), actor_role=user.get("role"),
+                 hospital_id=user.get("hospital_id"), case_id=case_id)
+
+    available = ["medical_history"] if history else []
+    missing = [] if history else ["medical_history"]
+    passed = [v for v in vitals_rows if v.get("validation_status") == "passed"]
+    flagged_only = bool(vitals_rows) and not passed
+    if passed:
+        available.insert(0, "vitals")
+    else:
+        missing.insert(0, "vitals")
+    missing += list(NOT_SUPPORTED_YET)
+
+    base = {
+        "case_id": case_id,
+        "available_modalities": available,
+        "missing_modalities": missing,
+        "unsupported_modalities": NOT_SUPPORTED_YET,
+        "clinician_review_required": True,
+        "safety": {"banner": SAFETY_BANNER, "footer": SAFETY_FOOTER},
+    }
+
+    condition_name = case.get("current_condition") or "heart_disease"
+    spec = resolve_condition(condition_name)
+    if spec is None:
+        audit_event("analysis.run", "denied", request=request, reason="unknown_condition", **actor)
+        raise _error(404, "unknown_condition", router._unknown_message(condition_name),
+                     known_conditions=sorted({s.canonical_name for s in CONDITION_REGISTRY.values()}), **base)
+    if not set(spec.specialist_ids) <= RECORD_SPECIALISTS:
+        audit_event("analysis.run", "denied", request=request, reason="unsupported_input", **actor)
+        raise _error(422, "MODEL_UNAVAILABLE",
+                     f"Condition {spec.canonical_name!r} needs inputs (e.g. scans, genomics) that this release "
+                     "cannot supply. No prediction was made.",
+                     condition=spec.canonical_name, specialists=router.status_for_condition(spec.canonical_name),
+                     **base)
+
+    if not passed:
+        audit_event("analysis.run", "denied", request=request, reason="insufficient_data", **actor)
+        msg = ("The only vitals on this case are flagged and awaiting review; flagged records are not analysed."
+               if flagged_only else "No validated vitals are recorded for this case.")
+        raise _error(422, "INSUFFICIENT_DATA", msg + " No prediction was made.", condition=spec.canonical_name,
+                     **base)
+
+    record = passed[0]  # newest first (Module 1 orders by uploaded_at desc)
+    mapped = feature_mapper.map_record(record)
+    if mapped.invalid or mapped.missing:
+        audit_event("analysis.run", "denied", request=request, reason="incomplete_data", **actor)
+        raise _error(422, "INSUFFICIENT_DATA",
+                     "The latest validated vitals are missing inputs the model needs; nothing was estimated.",
+                     condition=spec.canonical_name, missing_features=mapped.missing,
+                     invalid_features=mapped.invalid, **base)
+
+    def run():
+        report = router.route(spec.canonical_name, {"vitals": {"features": mapped.features}})
+        return report
+
+    try:
+        report = await run_in_threadpool(run)
+    except SpecialistUnavailableError as e:
+        audit_event("analysis.run", "denied", request=request, reason="model_unavailable", **actor)
+        raise _error(503, "MODEL_UNAVAILABLE", "The vitals specialist has no model loaded, and no fallback is enabled.",
+                     specialist=e.status, model=VITALS_MODEL_INFO.to_dict(), **base)
+    except IncompleteDataError as e:
+        raise _error(422, "INSUFFICIENT_DATA", str(e), missing_features=e.missing_features, **base)
+    except UnknownConditionError as e:
+        raise _error(404, "unknown_condition", str(e), **base)
+
+    finding = report.findings[0]
+    card, pred = finding.status, finding.prediction
+    model_status = _model_status(card, VITALS_MODEL_INFO)
+    explanation = _explanation(finding, mapped, report.unresolved_explainers)
+    warnings = _warnings(card, pred)
+
+    dq = []
+    if len(passed) < len(vitals_rows):
+        dq.append({"code": "flagged_vitals_ignored",
+                   "message": "Some vitals on this case are flagged and awaiting review; only validated vitals were used."})
+    if len(passed) > 1:
+        dq.append({"code": "latest_vitals_used", "message": "Several validated vitals exist; the most recent was used."})
+
+    basis = " and ".join(x.replace("_", " ") for x in available)
+    statement = (f"This assessment is based on available {basis}. "
+                 + " ".join(f"{m.replace('_', ' ').capitalize()} evidence was not available."
+                            for m in missing if m != "medical_history" or not history)
+                 ).strip()
+    statement += (" Medical history is shown for clinician context; the model did not use it."
+                  if history else "")
+
+    audit_event("analysis.run", "success", request=request, model_version=card.get("model_version"), **actor)
+
+    return {
+        **base,
+        "status": "ok",
+        "condition": spec.canonical_name,
+        "basis_statement": statement,
+        "findings": [{"kind": "model_output", "label": pred.label, "source": finding.specialist_id,
+                      "note": "A model output for clinician review, not a diagnosis."}],
+        "risk_assessment": {"label": pred.label, "scale": "model output class", "calibrated": False},
+        "confidence": pred.confidence,
+        "uncertainty": {"calibrated": False,
+                        "note": "Confidence is the model's raw score. It has not been calibrated or "
+                                "clinically validated and must not be read as a probability of disease."},
+        "evidence": [{"source": "vitals", "feature": i["feature"], "value": i["value"], "used_by_model": True}
+                     for i in mapped.inputs]
+                    + ([{"source": "medical_history", "used_by_model": False,
+                         "note": "Recorded for clinician context; not a model input."}] if history else []),
+        "explanation": {**explanation,
+                        "what_was_used": "SHAP feature contributions for the vitals model's inputs",
+                        "reliability": "Explains this model's behaviour only; it says nothing about causation "
+                                       "and is only as meaningful as the model itself."},
+        "model": {"name": card.get("model_name"), "version": card.get("model_version"), "status": model_status,
+                  "training_status": card.get("training_status"), "source": VITALS_MODEL_INFO.to_dict()},
+        "data_quality_warnings": dq,
+        "warnings": warnings,
+        "urgent_review_flags": [],   # no clinical rule engine exists; none are invented
+        "stub_or_fallback": model_status in ("STUB", "FALLBACK", "UNAVAILABLE"),
+    }
+
+
 @app.post("/synthesize/heart_disease", status_code=410)
 def synthesize_heart_disease_removed(request: Request, _user: dict = Depends(require_authenticated_user)):
     """Retired: hand-entered features. The old body was 8 numbers in a legacy

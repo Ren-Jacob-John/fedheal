@@ -453,10 +453,10 @@ class TestCors:
         resp = self._preflight(sx.DEFAULT_ORIGIN, "GET")
         assert resp.headers["access-control-allow-origin"] != "*"
         allowed = {m.strip() for m in resp.headers["access-control-allow-methods"].split(",")}
-        assert allowed == {"GET", "POST", "PATCH"}
+        assert allowed == {"GET", "POST", "PATCH", "PUT"}   # PUT: case medical-history upsert
         assert "*" not in resp.headers.get("access-control-allow-headers", "")
 
-    @pytest.mark.parametrize("method", ["DELETE", "PUT"])
+    @pytest.mark.parametrize("method", ["DELETE"])
     def test_unused_methods_are_refused(self, method):
         assert self._preflight(sx.DEFAULT_ORIGIN, method).status_code == 400
 
