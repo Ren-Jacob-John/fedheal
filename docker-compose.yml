@@ -3,6 +3,8 @@
 #   cp deploy/compose.env.example .env   # then replace every CHANGE_ME
 #   docker compose up --build
 # Every secret is required (":?"); compose refuses to start with one unset.
+# First login: docker compose exec -e FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD=... auth python create_super_admin.py --email you@example.org
+# (public registration is closed; hospital admins create doctors).
 x-common: &common
   restart: unless-stopped
   env_file: .env
@@ -27,8 +29,16 @@ services:
     environment:
       FEDHEAL_DATABASE_URL: postgresql://fedheal:${POSTGRES_PASSWORD}@db:5432/fedheal
       FEDHEAL_VALIDATION_API_URL: http://validation:8002
-    depends_on: {db: {condition: service_healthy}}
+    depends_on:
+      db: {condition: service_healthy}
+      validation: {condition: service_healthy}
     ports: ["8001:8001"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
 
   validation:      # Module 2
     <<: *common
@@ -36,6 +46,12 @@ services:
     environment:
       FEDHEAL_ADMIN_API_URL: http://admin:8005
     ports: ["8002:8002"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
 
   admin:           # Module 7
     <<: *common
@@ -43,15 +59,33 @@ services:
     environment:
       FEDHEAL_DATABASE_URL: postgresql://fedheal:${POSTGRES_PASSWORD}@db:5432/fedheal
       FEDMED_AUTH_API_URL: http://auth:8001
-    depends_on: {db: {condition: service_healthy}}
+    depends_on:
+      db: {condition: service_healthy}
+      auth: {condition: service_healthy}     # shares the database; Module 1's migrations run first
     ports: ["8005:8005"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
 
   synthesis:       # Module 8 (Modules 5 and 6 are bundled into this image)
     <<: *common
     build: {context: ., dockerfile: module8-synthesis/Dockerfile}
     environment:
       FEDHEAL_AUTH_API_URL: http://auth:8001
+      FEDHEAL_ADMIN_API_URL: http://admin:8005     # where the PROMOTED model is read from
+    depends_on:
+      auth: {condition: service_healthy}
+      admin: {condition: service_healthy}
     ports: ["8006:8006"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8006/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
 
   fl-server:       # Module 3 Flower server; plaintext gRPC, LAN/localhost only (no TLS yet)
     <<: *common

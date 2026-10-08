@@ -28,14 +28,20 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 
 import config
+import service_auth
 from audit import audit_event
 
 # Real values are REQUIRED in staging/production (startup fails otherwise);
 # development/test fall back to dev-only values. See config.py.
 SECRET_KEY = config.get_secret("FEDMED_JWT_SECRET", dev_default="dev-only-change-me")
 ALGORITHM = "HS256"
-MODULE2_SERVICE_KEY = config.get_secret("FEDHEAL_SVC_KEY_M2_M7", dev_default="dev-only-key-module2-to-module7")
-MODULE3_SERVICE_KEY = config.get_secret("FEDHEAL_SVC_KEY_M3_M7", dev_default="dev-only-key-module3-to-module7")
+# One signing key PER HOP. Callers present short-lived signed tokens (service_auth.py) that say who
+# they are, which endpoint family they are for, and which hospital they may act for.
+M2_M7_SIGNING_KEY = config.get_secret("FEDHEAL_SVC_SIGNING_KEY_M2_M7", dev_default="dev-only-signing-key-module2-to-module7")
+M3_M7_SIGNING_KEY = config.get_secret("FEDHEAL_SVC_SIGNING_KEY_M3_M7", dev_default="dev-only-signing-key-module3-to-module7")
+M8_M7_SIGNING_KEY = config.get_secret("FEDHEAL_SVC_SIGNING_KEY_M8_M7", dev_default="dev-only-signing-key-module8-to-module7")
+config.warn_if_set("FEDHEAL_SVC_KEY_M2_M7", "FEDHEAL_SVC_SIGNING_KEY_M2_M7 (hospital-scoped tokens)")
+config.warn_if_set("FEDHEAL_SVC_KEY_M3_M7", "FEDHEAL_SVC_SIGNING_KEY_M3_M7 (scoped tokens)")
 
 # Same cookie name Module 1 sets on login — browsers send cookies by host,
 # not by port, so the dashboard's session cookie (set by Module 1 on :8001)
@@ -79,17 +85,32 @@ def require_super_admin(request: Request, token: str | None = Depends(oauth2_sch
     return payload
 
 
-def _check_service_key(request: Request, presented: str | None, expected: str, caller: str) -> None:
-    # Constant-time comparison; a missing header never matches.
-    if presented is None or not hmac.compare_digest(presented.encode("utf-8"), expected.encode("utf-8")):
+def _verify_hop(request: Request, presented: str | None, *, key: str, audiences, callers, caller: str) -> dict:
+    try:
+        return service_auth.verify_service_token(presented, signing_key=key, allowed_audiences=audiences,
+                                                 allowed_callers=callers)
+    except HTTPException as e:
         audit_event("service_authn.failure", "denied", request=request, actor_service=caller,
-                    reason="invalid_service_key")
-        raise HTTPException(status_code=401, detail="Missing or invalid service key")
+                    reason="invalid_service_credential" if e.status_code == 401 else "wrong_audience_or_caller")
+        raise
 
 
-def require_module2_service_key(request: Request, x_service_key: str | None = Header(default=None)) -> None:
-    _check_service_key(request, x_service_key, MODULE2_SERVICE_KEY, "module2")
+def require_flag_report(request: Request, x_service_key: str | None = Header(default=None)) -> dict:
+    """M2 -> M7 flag summary. Returns verified claims; the route must check hid == the hospital in the body."""
+    return _verify_hop(request, x_service_key, key=M2_M7_SIGNING_KEY, caller="module2",
+                       audiences={service_auth.AUD_FLAG_REPORT}, callers={"module2"})
 
 
-def require_module3_service_key(request: Request, x_service_key: str | None = Header(default=None)) -> None:
-    _check_service_key(request, x_service_key, MODULE3_SERVICE_KEY, "module3")
+def require_round_report(request: Request, x_service_key: str | None = Header(default=None)) -> dict:
+    return _verify_hop(request, x_service_key, key=M3_M7_SIGNING_KEY, caller="module3",
+                       audiences={service_auth.AUD_ROUND_REPORT}, callers={"module3"})
+
+
+def require_model_candidate_credential(request: Request, x_service_key: str | None = Header(default=None)) -> dict:
+    return _verify_hop(request, x_service_key, key=M3_M7_SIGNING_KEY, caller="module3",
+                       audiences={service_auth.AUD_MODEL_CANDIDATE}, callers={"module3"})
+
+
+def require_promoted_model_read(request: Request, x_service_key: str | None = Header(default=None)) -> dict:
+    return _verify_hop(request, x_service_key, key=M8_M7_SIGNING_KEY, caller="module8",
+                       audiences={service_auth.AUD_PROMOTED_MODEL}, callers={"module8"})

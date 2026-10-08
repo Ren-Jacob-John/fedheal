@@ -9,7 +9,7 @@ from jose import jwt
 
 import auth
 import main
-from model_registry import Policy, evaluate_candidate
+from model_registry import Policy, canonical_hash, evaluate_candidate
 
 client = TestClient(main.app)
 
@@ -21,21 +21,30 @@ def admin():
 
 
 def svc():
-    return {"X-Service-Key": auth.MODULE3_SERVICE_KEY}
+    import service_auth
+    return {"X-Service-Key": service_auth.mint_service_token(
+        auth.M3_M7_SIGNING_KEY, caller="module3", audience=service_auth.AUD_MODEL_CANDIDATE, hospital_id="*")}
 
 
 _counter = [0]
 
 
+SPEC = {"feature_names": ["a", "b", "c"], "center": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]}
+
+
 def cand(accuracy=0.80, n_eval=120, hospitals=("ha", "hb"), **over):
     _counter[0] += 1
+    coef, intercept = [[0.1 * _counter[0], -0.2, 0.3]], [0.05]
     body = {
         "model_name": "vitals-fedavg", "condition": f"cond-{over.pop('cond', 'x')}", "training_round": 3,
         "participating_hospitals": list(hospitals),
         "training_metadata": {"aggregation": "fedavg", "validated_records_only": True,
                               "labels_from_hospital_only": True},
         "metrics": {"accuracy": accuracy, "n_eval": n_eval},
-        "artifact_hash": hashlib.sha256(f"artifact-{_counter[0]}".encode()).hexdigest(),
+        "parameters": {"coef": coef, "intercept": intercept},
+        "input_spec": SPEC,
+        "artifact_hash": canonical_hash(coef, intercept),
+        "parameters_verified": True,       # computed by the registry on registration; here for direct gate calls
     }
     body.update(over)
     return body
@@ -183,3 +192,66 @@ def test_registry_refuses_anything_that_looks_like_raw_data(where, payload):
     body = cand(cond="raw")
     body[where] = {**body[where], **payload}
     assert register(body).status_code == 422
+
+
+# ---- weights: verified, stored, served only when promoted ----
+
+def m8_headers(aud=None):
+    import service_auth
+    return {"X-Service-Key": service_auth.mint_service_token(
+        auth.M8_M7_SIGNING_KEY, caller="module8", audience=aud or service_auth.AUD_PROMOTED_MODEL, hospital_id="*")}
+
+
+def test_registry_rederives_the_hash_and_refuses_a_mismatch():
+    body = cand(cond="hash")
+    body["artifact_hash"] = canonical_hash([[9.0, 9.0, 9.0]], [0.0])
+    assert register(body).status_code == 422
+
+
+def test_malformed_parameters_are_refused():
+    for bad in ({"coef": [[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]], "intercept": [0.0]},
+                {"coef": [[float("nan"), 1.0, 1.0]], "intercept": [0.0]},
+                {"coef": [[1.0, 2.0]], "intercept": [0.0]},       # does not match the 3-feature input_spec
+                {"coef": [[1.0, 2.0, 3.0]]}):
+        body = cand(cond="malformed")
+        body["parameters"] = bad
+        assert register(body).status_code in (422,), bad
+
+
+def test_candidate_without_weights_cannot_pass_the_gate():
+    body = cand(cond="noweights")
+    del body["parameters"], body["input_spec"]
+    c = register(body).json()
+    v = client.post(f"/admin/models/{c['id']}/validate", headers=admin()).json()
+    assert v["deployment_status"] == "REJECTED"
+    assert next(ch for ch in v["validation_report"]["checks"] if ch["name"] == "integrity")["status"] == "FAIL"
+
+
+def test_only_the_promoted_model_is_served_and_only_to_module8():
+    cond = "cond-serve"
+    c = register(cand(cond="serve")).json()
+    q = {"condition": cond}
+    assert client.get("/admin/models/promoted", params=q, headers=m8_headers()).status_code == 404   # candidate is not served
+    client.post(f"/admin/models/{c['id']}/validate", headers=admin())
+    assert client.get("/admin/models/promoted", params=q, headers=m8_headers()).status_code == 404   # validated is not served
+    client.post(f"/admin/models/{c['id']}/promote", json={}, headers=admin())
+    r = client.get("/admin/models/promoted", params=q, headers=m8_headers())
+    assert r.status_code == 200
+    b = r.json()
+    assert b["version"] == "v1" and b["artifact_hash"] == c["artifact_hash"] and b["parameters"]["coef"]
+    assert b["input_spec"]["feature_names"] == SPEC["feature_names"]
+    assert client.get("/admin/models/promoted", params=q).status_code == 401
+    assert client.get("/admin/models/promoted", params=q, headers=admin()).status_code == 401      # a user JWT is not a service token
+    assert client.get("/admin/models/promoted", params=q, headers=svc()).status_code == 401        # M3's key is not M8's
+    import service_auth
+    assert client.get("/admin/models/promoted", params=q,
+                      headers=m8_headers(service_auth.AUD_ROUND_REPORT)).status_code == 403
+
+
+def test_rollback_changes_what_is_served():
+    cond = "cond-rbserve"
+    v1 = full_cycle("rbserve")
+    v2 = full_cycle("rbserve", 0.85)
+    assert client.get("/admin/models/promoted", params={"condition": cond}, headers=m8_headers()).json()["version"] == "v2"
+    client.post("/admin/models/rollback", params={"model_name": "vitals-fedavg", "condition": cond}, headers=admin())
+    assert client.get("/admin/models/promoted", params={"condition": cond}, headers=m8_headers()).json()["version"] == "v1"

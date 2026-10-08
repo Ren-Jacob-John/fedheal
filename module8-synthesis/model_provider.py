@@ -4,12 +4,12 @@ importantly, what it says about that.
 
 Status of the model sources, in order of preference:
 
-  1. FEDERATED GLOBAL MODEL (Module 3)   NOT AVAILABLE YET.
-     Module 3 trains a global model in memory each round but does not
-     persist or export it, so there is nothing for this service to load.
-     When Module 3 gains an export step, integrate it HERE and set
-     training_status="federated", is_fallback=False. Until then nothing in
-     this service may describe any model as federated or hospital-trained.
+  1. FEDERATED GLOBAL MODEL (Module 3 -> Module 7 registry)   see promoted_model.py.
+     Module 3 exports and registers candidates; only a model that passed the
+     validation gate AND was promoted by a super_admin is served, loaded from
+     Module 7 by promoted_model.fetch_promoted(). It is used by
+     POST /cases/{id}/analyze; this file's specialist (below) is only the
+     explicitly-enabled demo fallback.
 
   2. DEMO FALLBACK (this file)           available only when explicitly allowed.
      The vitals specialist is fitted on the vendored public UCI Heart Disease
@@ -58,10 +58,9 @@ class ModelSourceInfo:
 
 
 def demo_model_allowed() -> bool:
-    raw = os.environ.get("FEDHEAL_ALLOW_DEMO_MODEL")
-    if raw is None or raw.strip() == "":
-        return config.is_local()          # on by default for development/test only
-    return raw.strip().lower() == "true"
+    """The demo fallback exists ONLY behind an explicit flag, in every environment (no implicit dev default):
+    an accidental demo model must never answer in place of a promoted federated one."""
+    return os.environ.get("FEDHEAL_ALLOW_DEMO_MODEL", "").strip().lower() == "true"
 
 
 def _load_uci_records() -> list[dict]:

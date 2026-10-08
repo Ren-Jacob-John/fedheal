@@ -96,7 +96,9 @@ def stack():
     services = {
         "m1": Service("module1", "module1-auth", p1, m1_env, tmp),
         "m2": Service("module2", "module2-validation", p2, base_env(FEDHEAL_ADMIN_API_URL="http://127.0.0.1:9"), tmp),
-        "m8": Service("module8", "module8-synthesis", p8, base_env(FEDHEAL_AUTH_API_URL=f"http://127.0.0.1:{p1}"), tmp),
+        "m8": Service("module8", "module8-synthesis", p8,
+                      base_env(FEDHEAL_AUTH_API_URL=f"http://127.0.0.1:{p1}", FEDHEAL_ALLOW_DEMO_MODEL="true",
+                               FEDHEAL_ADMIN_API_URL="http://127.0.0.1:9"), tmp),
         # Same Module 8 with the demo fallback explicitly OFF: the vitals specialist has no model.
         "m8_nomodel": Service("module8_nomodel", "module8-synthesis", p8b,
                               base_env(FEDHEAL_AUTH_API_URL=f"http://127.0.0.1:{p1}", FEDHEAL_ALLOW_DEMO_MODEL="false"), tmp),
@@ -124,9 +126,16 @@ def make_hospital_user(m1, admin_token):
     h = httpx.post(f"{m1.url}/hospitals", json={"name": f"E2E {uuid.uuid4().hex[:8]}"}, headers=bearer(admin_token), timeout=20)
     assert h.status_code == 200, h.text
     hid = h.json()["id"]
+    # Production onboarding: super_admin -> hospital_admin -> doctor. Public registration is closed.
+    adm_email = f"hadm-{uuid.uuid4().hex[:8]}@e2e.fedheal.local"
+    a = httpx.post(f"{m1.url}/admin/users", headers=bearer(admin_token), timeout=20,
+                   json={"email": adm_email, "password": "e2e-hospital-admin-1", "role": "hospital_admin", "hospital_id": hid})
+    assert a.status_code == 200, a.text
+    adm_tok = login(m1, adm_email, "e2e-hospital-admin-1")
     email, pw = f"clin-{uuid.uuid4().hex[:8]}@e2e.fedheal.local", "e2e-clinician-pass-1"
-    reg = httpx.post(f"{m1.url}/register", json={"email": email, "password": pw, "hospital_id": hid}, timeout=20)
-    assert reg.status_code == 200, reg.text
+    d = httpx.post(f"{m1.url}/hospital/doctors", headers=bearer(adm_tok), timeout=20,
+                   json={"full_name": "E2E Doctor", "email": email, "password": pw})
+    assert d.status_code == 201, d.text
     return hid, login(m1, email, pw)
 
 

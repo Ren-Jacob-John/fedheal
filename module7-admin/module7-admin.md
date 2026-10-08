@@ -78,8 +78,8 @@ Interactive API docs: `http://localhost:8005/docs`
 
 **Environment variables:** `FEDHEAL_DATABASE_URL` (or
 `FEDHEAL_ADMIN_DATABASE_URL` for a separate project), `FEDMED_JWT_SECRET`
-(must match Module 1's), `FEDHEAL_SVC_KEY_M2_M7` (must match Module 2's
-caller value), `FEDHEAL_SVC_KEY_M3_M7` (must match Module 3's caller
+(must match Module 1's), `FEDHEAL_SVC_SIGNING_KEY_M2_M7` (must match Module 2's
+caller value), `FEDHEAL_SVC_SIGNING_KEY_M3_M7 and FEDHEAL_SVC_SIGNING_KEY_M8_M7` (must match Module 3's caller
 value), `FEDMED_AUTH_API_URL` (where Module 1 is reachable).
 
 ## How it depends on / is depended on by other modules

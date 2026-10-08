@@ -19,9 +19,9 @@ training data (membership inference, gradient inversion). Current state, stated 
 
 | Mechanism | State |
 |---|---|
-| Authentication / authorization of the update path | Implemented (per-hop service keys; scoped export tokens) |
+| Authentication / authorization of the update path | Implemented: short-lived signed service tokens with a separate key per hop (caller, endpoint family, hospital scope, expiry). Module 2 → 7 flag reports are hospital-scoped; Module 3 → 7 and Module 8 → 7 are platform-level (aggregates / weights only) |
 | Audit logging of registration / validation / promotion / rollback | Implemented |
-| Update validation | Partial: registry integrity + gate; no per-update anomaly screening |
+| Update validation | Partial: the registry re-derives the weight hash itself and refuses a mismatch; refuses patient-like fields and oversized values; validation gate before promotion. No per-update anomaly screening |
 | Transport encryption (TLS) | **Not implemented.** Flower gRPC is plaintext; run on a trusted network only |
 | Update clipping | **Not implemented** |
 | Differential privacy | **Not implemented** |

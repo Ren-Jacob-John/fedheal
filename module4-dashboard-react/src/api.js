@@ -187,6 +187,15 @@ export const authApi = {
   putHistory(token, caseId, body) {
     return request(AUTH_API_BASE, `/cases/${caseId}/history`, { method: "PUT", token, body });
   },
+  uploadScan(token, caseId, scanType, fileObj) {
+    const fd = new FormData();
+    fd.append("scan_type", scanType);
+    fd.append("file", fileObj);
+    return request(AUTH_API_BASE, `/cases/${caseId}/scans`, { method: "POST", token, file: fd });
+  },
+  listScans(token, caseId) {
+    return request(AUTH_API_BASE, `/cases/${caseId}/scans`, { token });
+  },
   reviewCase(token, caseId, decision, clinicianNote) {
     return request(AUTH_API_BASE, `/cases/${caseId}/review`, {
       method: "POST", token, body: { decision, clinician_note: clinicianNote || null },

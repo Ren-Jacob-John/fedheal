@@ -62,23 +62,59 @@ def test_trigger_requires_super_admin():
     assert client.post("/admin/rounds/trigger", headers=bearer(jwt_for("clinician"))).status_code == 403
 
 
+def svc_token(key, caller, aud, hid):
+    import service_auth
+    return {"X-Service-Key": service_auth.mint_service_token(key, caller=caller, audience=aud, hospital_id=hid)}
+
+
 class TestServiceKeys:
     FLAG = {"hospital_id": "h1", "status": "flagged", "reason": "bp out of range", "count": 2}
     ROUND = {"round_number": 1, "n_hospitals": 2}
 
-    def test_flags_need_module2_key(self):
+    def m2(self, hid="h1", aud=None):
+        import service_auth
+        return svc_token(auth.M2_M7_SIGNING_KEY, "module2", aud or service_auth.AUD_FLAG_REPORT, hid)
+
+    def m3(self, aud=None, hid="*"):
+        import service_auth
+        return svc_token(auth.M3_M7_SIGNING_KEY, "module3", aud or service_auth.AUD_ROUND_REPORT, hid)
+
+    def test_flags_need_a_module2_token_scoped_to_that_hospital(self):
         assert client.post("/admin/flags", json=self.FLAG).status_code == 401
         assert client.post("/admin/flags", json=self.FLAG, headers={"X-Service-Key": "iammightythor"}).status_code == 401
-        assert client.post("/admin/flags", json=self.FLAG, headers={"X-Service-Key": auth.MODULE3_SERVICE_KEY}).status_code == 401
-        ok = client.post("/admin/flags", json=self.FLAG, headers={"X-Service-Key": auth.MODULE2_SERVICE_KEY})
+        # a token signed with another hop's key is forged here
+        assert client.post("/admin/flags", json=self.FLAG, headers=self.m3()).status_code == 401
+        ok = client.post("/admin/flags", json=self.FLAG, headers=self.m2("h1"))
         assert ok.status_code == 200
 
-    def test_rounds_need_module3_key(self):
+    def test_flag_for_another_hospital_is_refused(self):
+        r = client.post("/admin/flags", json={**self.FLAG, "hospital_id": "h2"}, headers=self.m2("h1"))
+        assert r.status_code == 403
+
+    def test_flag_token_cannot_be_wildcard_or_wrong_audience(self):
+        import service_auth
+        with pytest.raises(ValueError):
+            service_auth.mint_service_token(auth.M2_M7_SIGNING_KEY, caller="module2",
+                                            audience=service_auth.AUD_FLAG_REPORT, hospital_id="*")
+        wrong = self.m2("h1", aud=service_auth.AUD_ROUND_REPORT)
+        assert client.post("/admin/flags", json=self.FLAG, headers=wrong).status_code == 403
+
+    def test_rounds_need_module3_round_token(self):
+        import service_auth
         assert client.post("/admin/rounds", json=self.ROUND).status_code == 401
         assert client.post("/admin/rounds", json=self.ROUND, headers={"X-Service-Key": "iamgodofdeath"}).status_code == 401
-        assert client.post("/admin/rounds", json=self.ROUND, headers={"X-Service-Key": auth.MODULE2_SERVICE_KEY}).status_code == 401
-        ok = client.post("/admin/rounds", json=self.ROUND, headers={"X-Service-Key": auth.MODULE3_SERVICE_KEY})
+        assert client.post("/admin/rounds", json=self.ROUND, headers=self.m2()).status_code == 401
+        # right key, wrong endpoint family -> authenticated but not authorised
+        wrong = self.m3(aud=service_auth.AUD_MODEL_CANDIDATE)
+        assert client.post("/admin/rounds", json=self.ROUND, headers=wrong).status_code == 403
+        ok = client.post("/admin/rounds", json=self.ROUND, headers=self.m3())
         assert ok.status_code == 200
+
+    def test_expired_service_token_is_rejected(self):
+        import service_auth
+        tok = service_auth.mint_service_token(auth.M3_M7_SIGNING_KEY, caller="module3",
+                                              audience=service_auth.AUD_ROUND_REPORT, hospital_id="*", ttl_seconds=-5)
+        assert client.post("/admin/rounds", json=self.ROUND, headers={"X-Service-Key": tok}).status_code == 401
 
     def test_user_jwt_is_not_a_service_key(self):
         assert client.post("/admin/flags", json=self.FLAG, headers={"X-Service-Key": jwt_for()}).status_code == 401

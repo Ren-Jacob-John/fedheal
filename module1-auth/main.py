@@ -412,8 +412,21 @@ def set_hospital_status(
 
 # ---------- User registration & login ----------
 
+# Public self-registration is OFF unless explicitly enabled (a local-development convenience). The supported
+# onboarding path is: super_admin creates the hospital and its hospital_admin, and the hospital_admin creates
+# doctors (POST /hospital/doctors). With the flag off nobody can self-create an account for any hospital.
+PUBLIC_REGISTRATION_ENABLED = os.environ.get("FEDHEAL_ALLOW_PUBLIC_REGISTRATION", "false").strip().lower() == "true"
+if PUBLIC_REGISTRATION_ENABLED:
+    logging.getLogger("fedheal").warning(
+        "FEDHEAL_ALLOW_PUBLIC_REGISTRATION=true: anyone can create a clinician account. Development only.")
+
+
 @app.post("/register", response_model=UserOut)
-def register(payload: UserRegister, db: Session = Depends(get_db)):
+def register(payload: UserRegister, request: Request, db: Session = Depends(get_db)):
+    if not PUBLIC_REGISTRATION_ENABLED:
+        audit_event("register", "denied", request=request, reason="public_registration_disabled")
+        raise HTTPException(status_code=403,
+                            detail="Public registration is disabled. Ask your hospital administrator to create your account.")
     if db.query(models.User).filter(models.User.email == payload.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -455,7 +468,7 @@ def create_admin_user(
     if payload.role not in (models.Role.HOSPITAL_ADMIN, models.Role.SUPER_ADMIN):
         raise HTTPException(
             status_code=400,
-            detail="Use POST /register for clinician accounts; this endpoint creates administrators only",
+            detail="This endpoint creates administrators only; hospital admins create doctors via POST /hospital/doctors",
         )
 
     if db.query(models.User).filter(models.User.email == payload.email).first():

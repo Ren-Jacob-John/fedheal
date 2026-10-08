@@ -15,12 +15,16 @@ Tenancy rules, enforced here and tested in test_cases.py:
   * A case that exists in another hospital answers 403 and is audited;
     audit events carry ids only, never clinical content.
 """
+import hashlib
 import logging
+import os
+import uuid
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -145,6 +149,37 @@ class HistoryOut(HistoryIn):
 class CaseVitalsIn(BaseModel):
     # One record. patient_ref and hospital are NOT accepted: they come from the case.
     record: dict
+
+
+SCAN_TYPES = frozenset({"chest_xray", "ct_slice", "retina", "skin", "histology", "other"})
+MAX_SCAN_BYTES = int(os.environ.get("FEDHEAL_MAX_SCAN_BYTES", 5 * 1024 * 1024))
+# Content is identified from the bytes (magic numbers). Neither the filename nor the client's Content-Type is trusted.
+SCAN_SIGNATURES = (("image/png", b"\x89PNG\r\n\x1a\n", ".png"), ("image/jpeg", b"\xff\xd8\xff", ".jpg"))
+ALLOWED_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg"})
+
+
+def upload_root() -> Path:
+    return Path(os.environ.get("FEDHEAL_UPLOAD_STORAGE_PATH", "./scan_uploads")).resolve()
+
+
+def sniff_image(data: bytes):
+    for ctype, magic, ext in SCAN_SIGNATURES:
+        if data.startswith(magic):
+            return ctype, ext
+    return None
+
+
+class ScanOut(BaseModel):
+    scan_id: str
+    case_id: str
+    hospital_id: str
+    scan_type: str
+    status: str
+    content_type: str
+    size_bytes: int
+    sha256: str
+    created_at: Optional[datetime]
+    analysis: str = "UNAVAILABLE: no validated imaging model exists in this release; the scan is stored and linked only."
 
 
 class ReviewIn(BaseModel):
@@ -368,6 +403,65 @@ def build_router(*, get_db, get_current_user, require_role, validation_api_url, 
                 .filter(models.VitalsRecord.case_id == case.id,
                         models.VitalsRecord.hospital_id == user.hospital_id)
                 .order_by(models.VitalsRecord.uploaded_at.desc()).all())
+
+    # ---------------- Scans (store + link only; analysis is explicitly unavailable) ----------------
+    @router.post("/cases/{case_id}/scans", response_model=ScanOut, status_code=201)
+    async def upload_scan(case_id: str, request: Request, scan_type: str = Form(...), file: UploadFile = File(...),
+                          db: Session = Depends(get_db), user: models.User = Depends(clinician_only)):
+        case = _own_case(db, request, user, case_id)
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > MAX_SCAN_BYTES + 64 * 1024:
+            audit_event("scan.upload", "denied", request=request, actor_user_id=user.id, actor_role=user.role,
+                        hospital_id=user.hospital_id, case_id=case.id, reason="too_large")
+            raise HTTPException(status_code=413, detail={"status": "INVALID_FILE", "message": "File is too large."})
+        deny = lambda reason, code, msg: (audit_event("scan.upload", "denied", request=request, actor_user_id=user.id,  # noqa: E731
+                                                       actor_role=user.role, hospital_id=user.hospital_id,
+                                                       case_id=case.id, reason=reason),
+                                          HTTPException(status_code=code, detail={"status": "INVALID_FILE", "message": msg}))[1]
+        if scan_type not in SCAN_TYPES:
+            raise deny("bad_scan_type", 422, f"scan_type must be one of {sorted(SCAN_TYPES)}")
+        ext = os.path.splitext(file.filename or "")[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise deny("bad_extension", 422, "Only .png, .jpg and .jpeg files are accepted in this release.")
+        data = await file.read(MAX_SCAN_BYTES + 1)
+        if len(data) > MAX_SCAN_BYTES:
+            raise deny("too_large", 413, f"File exceeds the {MAX_SCAN_BYTES} byte limit.")
+        if not data:
+            raise deny("empty", 422, "The file is empty.")
+        sniffed = sniff_image(data)
+        if sniffed is None:
+            raise deny("bad_signature", 422, "The file content is not a PNG or JPEG image.")
+        ctype, canonical_ext = sniffed
+        if (file.content_type or "").lower() not in ("", "application/octet-stream", ctype):
+            raise deny("mime_mismatch", 422, "The declared MIME type does not match the file content.")
+        scan_id = str(uuid.uuid4())
+        rel = Path(user.hospital_id) / case.id / f"{scan_id}{canonical_ext}"      # server-generated; ids only
+        dest = (upload_root() / rel).resolve()
+        if upload_root() not in dest.parents:
+            raise deny("path_escape", 400, "Invalid storage path.")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        row = models.Scan(id=scan_id, case_id=case.id, hospital_id=user.hospital_id, scan_type=scan_type,
+                          file_reference=str(rel), content_type=ctype, size_bytes=len(data),
+                          sha256=hashlib.sha256(data).hexdigest(), status="UPLOADED", uploaded_by=user.id)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        audit_event("scan.upload", "success", request=request, actor_user_id=user.id, actor_role=user.role,
+                    hospital_id=user.hospital_id, case_id=case.id, resource_type="scan", resource_id=row.id)
+        return ScanOut(scan_id=row.id, case_id=row.case_id, hospital_id=row.hospital_id, scan_type=row.scan_type,
+                       status=row.status, content_type=row.content_type, size_bytes=row.size_bytes,
+                       sha256=row.sha256, created_at=row.created_at)
+
+    @router.get("/cases/{case_id}/scans", response_model=list[ScanOut])
+    def list_scans(case_id: str, request: Request, db: Session = Depends(get_db),
+                   user: models.User = Depends(clinician_only)):
+        case = _own_case(db, request, user, case_id)
+        rows = (db.query(models.Scan).filter(models.Scan.case_id == case.id, models.Scan.hospital_id == user.hospital_id)
+                .order_by(models.Scan.created_at).all())
+        return [ScanOut(scan_id=r.id, case_id=r.case_id, hospital_id=r.hospital_id, scan_type=r.scan_type,
+                        status=r.status, content_type=r.content_type, size_bytes=r.size_bytes, sha256=r.sha256,
+                        created_at=r.created_at) for r in rows]
 
     # ---------------- Clinician review ----------------
     @router.post("/cases/{case_id}/review", response_model=ReviewOut, status_code=201)

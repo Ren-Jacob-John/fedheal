@@ -106,15 +106,17 @@ class TestDevelopment:
 
 
 @pytest.mark.parametrize("module,code,keys", [
-    ("module2-validation", "import main", ["FEDHEAL_SVC_SIGNING_KEY_M1_M2", "FEDHEAL_SVC_KEY_M2_M7"]),
-    ("module7-admin", "import main", ["FEDMED_JWT_SECRET", "FEDHEAL_SVC_KEY_M2_M7", "FEDHEAL_SVC_KEY_M3_M7",
+    ("module2-validation", "import main", ["FEDHEAL_SVC_SIGNING_KEY_M1_M2", "FEDHEAL_SVC_SIGNING_KEY_M2_M7"]),
+    ("module7-admin", "import main", ["FEDMED_JWT_SECRET", "FEDHEAL_SVC_SIGNING_KEY_M2_M7",
+                                      "FEDHEAL_SVC_SIGNING_KEY_M3_M7", "FEDHEAL_SVC_SIGNING_KEY_M8_M7",
                                       "FEDHEAL_DASHBOARD_ORIGIN"]),
-    ("module8-synthesis", "import main", ["FEDMED_JWT_SECRET", "FEDHEAL_DASHBOARD_ORIGIN"]),
+    ("module8-synthesis", "import main", ["FEDMED_JWT_SECRET", "FEDHEAL_SVC_SIGNING_KEY_M8_M7", "FEDHEAL_DASHBOARD_ORIGIN"]),
 ])
 def test_other_services_fail_fast_in_production(module, code, keys):
     base = {**GOOD, "FEDHEAL_ENV": "production",
-            "FEDHEAL_SVC_KEY_M2_M7": "Zx3Cv7BnMq1WeRt5YuIo9PaSd2FgHj4K",
-            "FEDHEAL_SVC_KEY_M3_M7": "Lk8Jh2GfDs6AqWe1RtYu4IoPz9XcVb3N",
+            "FEDHEAL_SVC_SIGNING_KEY_M2_M7": "Zx3Cv7BnMq1WeRt5YuIo9PaSd2FgHj4K",
+            "FEDHEAL_SVC_SIGNING_KEY_M3_M7": "Lk8Jh2GfDs6AqWe1RtYu4IoPz9XcVb3N",
+            "FEDHEAL_SVC_SIGNING_KEY_M8_M7": "Qp5Rt8WnBv2XcZm4LkJh7GfDs1AaSd3F",
             "FEDHEAL_ADMIN_DATABASE_URL": "sqlite:////tmp/fedheal_cfg_test_admin.db"}
     assert run(module, code, base).returncode == 0
     for key in keys:

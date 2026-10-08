@@ -48,6 +48,7 @@ from fusion import FusionLayer  # noqa: E402
 import config  # noqa: E402
 import feature_mapper  # noqa: E402
 import model_provider  # noqa: E402
+import promoted_model  # noqa: E402
 from audit import audit_event  # noqa: E402
 from auth import get_raw_token, require_authenticated_user  # noqa: E402
 from docs_theme import mount_custom_docs  # noqa: E402
@@ -317,7 +318,24 @@ async def fetch_case_bundle(case_id: str, token: str | None) -> dict:
     case = await _m1_get(f"/cases/{case_id}", token)
     history = await _m1_get(f"/cases/{case_id}/history", token, missing_ok=True)
     vitals = await _m1_get(f"/cases/{case_id}/vitals", token)
-    return {"case": case, "history": history, "vitals": vitals}
+    scans = await _m1_get(f"/cases/{case_id}/scans", token, missing_ok=True) or []
+    return {"case": case, "history": history, "vitals": vitals, "scans": scans}
+
+
+def _basis(available: list, missing: list, history, scans: list) -> str:
+    basis = " and ".join(x.replace("_", " ") for x in available)
+    parts = [f"This assessment is based on available {basis}."]
+    for m in missing:
+        if m == "medical_history" and history:
+            continue
+        if m == "scan" and scans:
+            parts.append(f"{len(scans)} scan(s) are stored for this case, but no validated imaging model exists in this "
+                         "release, so no image analysis was performed and no imaging findings are reported.")
+        else:
+            parts.append(f"{m.replace('_', ' ').capitalize()} evidence was not available.")
+    if history:
+        parts.append("Medical history is shown for clinician context; the model did not use it.")
+    return " ".join(parts)
 
 
 def _model_status(card: dict, info) -> str:
@@ -339,6 +357,7 @@ async def analyze_case(
 ):
     bundle = await fetch_case_bundle(case_id, token)
     case, history, vitals_rows = bundle["case"], bundle["history"], bundle["vitals"]
+    scans = bundle.get("scans") or []
     actor = dict(actor_user_id=user.get("sub"), actor_role=user.get("role"),
                  hospital_id=user.get("hospital_id"), case_id=case_id)
 
@@ -357,11 +376,21 @@ async def analyze_case(
         "available_modalities": available,
         "missing_modalities": missing,
         "unsupported_modalities": NOT_SUPPORTED_YET,
+        # Stored and linked, but never analysed: there is no validated imaging model, and no image finding is invented.
+        "uploaded_unanalysed_modalities": ({"scan": {"count": len(scans), "status": "UPLOADED",
+                                                      "analysis": "UNAVAILABLE: no validated imaging model in this release"}}
+                                           if scans else {}),
         "clinician_review_required": True,
         "safety": {"banner": SAFETY_BANNER, "footer": SAFETY_FOOTER},
     }
 
-    condition_name = case.get("current_condition") or "heart_disease"
+    condition_name = case.get("current_condition")
+    if not condition_name:
+        # The condition is resolved only from explicit case metadata; it is never guessed.
+        audit_event("analysis.run", "denied", request=request, reason="condition_not_set", **actor)
+        raise _error(422, "CONDITION_NOT_SET",
+                     "This case has no condition set. Set the case's condition so the correct model can be selected; "
+                     "no condition was assumed and no prediction was made.", **base)
     spec = resolve_condition(condition_name)
     if spec is None:
         audit_event("analysis.run", "denied", request=request, reason="unknown_condition", **actor)
@@ -391,6 +420,68 @@ async def analyze_case(
                      condition=spec.canonical_name, missing_features=mapped.missing,
                      invalid_features=mapped.invalid, **base)
 
+    # ---- 1. The PROMOTED federated model, if the registry has one for this condition ----
+    registry_note = None
+    try:
+        promoted = await run_in_threadpool(promoted_model.fetch_promoted, spec.canonical_name)
+    except promoted_model.RegistryUnavailable as e:
+        promoted = None
+        registry_note = str(e)
+        if not model_provider.demo_model_allowed():
+            audit_event("analysis.run", "denied", request=request, reason="registry_unavailable", **actor)
+            raise _error(503, "MODEL_UNAVAILABLE",
+                         "The model registry could not be reached, so it is unknown whether a promoted model exists. "
+                         "No prediction was made.", registry=registry_note, **base)
+    except promoted_model.PromotedModelIntegrityError as e:
+        audit_event("analysis.run", "denied", request=request, reason="promoted_model_integrity", **actor)
+        raise _error(503, "MODEL_UNAVAILABLE", f"The promoted model failed its integrity check ({e}). No prediction was made.", **base)
+
+    if promoted is not None:
+        by_name = {i["feature"]: i["value"] for i in mapped.inputs}
+        if set(promoted.feature_names) - set(by_name):
+            audit_event("analysis.run", "denied", request=request, reason="promoted_input_mismatch", **actor)
+            raise _error(503, "MODEL_UNAVAILABLE", "The promoted model needs inputs this service cannot supply.",
+                         required=list(promoted.feature_names), **base)
+        out = promoted.predict(by_name)
+        audit_event("analysis.run", "success", request=request, model_version=promoted.version, **actor)
+        dq = []
+        if len(passed) < len(vitals_rows):
+            dq.append({"code": "flagged_vitals_ignored", "message": "Some vitals on this case are flagged and awaiting review; only validated vitals were used."})
+        if len(passed) > 1:
+            dq.append({"code": "latest_vitals_used", "message": "Several validated vitals exist; the most recent was used."})
+        statement = _basis(available, missing, history, scans)
+        return {
+            **base, "status": "ok", "condition": spec.canonical_name, "basis_statement": statement,
+            "findings": [{"kind": "model_output", "label": f"model output: class {out['label']}", "source": "promoted_federated_model",
+                          "note": "Class 1 is the positive outcome label recorded by the contributing hospitals. A model output for clinician review, not a diagnosis."}],
+            "risk_assessment": {"label": f"class {out['label']}", "scale": "model output class", "calibrated": False},
+            "confidence": out["confidence"],
+            "uncertainty": {"calibrated": False,
+                            "note": "Confidence is the model's raw score. It has not been calibrated or clinically validated "
+                                    "and must not be read as a probability of disease."},
+            "evidence": [{"source": "vitals", "feature": c["feature"], "value": c["value"], "used_by_model": True}
+                         for c in out["contributions"]]
+                        + ([{"source": "medical_history", "used_by_model": False,
+                             "note": "Recorded for clinician context; not a model input."}] if history else []),
+            "explanation": {"status": "available", "method": "linear_contributions",
+                            "contributions": [{"feature": c["feature"], "value": c["value"], "contribution": c["contribution"]}
+                                              for c in out["contributions"]],
+                            "base_value": out["intercept"],
+                            "what_was_used": "Per-feature contribution to the model's log-odds (coefficient x normalised value) "
+                                             "for this linear model; exact for it, not SHAP and not a causal explanation.",
+                            "reliability": "Explains this model's arithmetic only. It says nothing about causation and is only as "
+                                           "meaningful as the model itself."},
+            "model": {"name": promoted.name, "version": promoted.version, "status": "DEPLOYED", "federated": True,
+                      "training_status": "federated", "source": {"source": "promoted_federated_model", "federated": True,
+                                                                  "hospital_trained": True},
+                      "provenance": promoted.provenance(),
+                      "note": "DEPLOYED means it passed this platform's engineering validation gate and was promoted by a "
+                              "platform administrator. It has not been clinically validated."},
+            "data_quality_warnings": dq, "warnings": [], "urgent_review_flags": [],
+            "non_clinical": True, "stub_or_fallback": False,
+        }
+
+    # ---- 2. No promoted model: only the explicitly-enabled demo fallback may answer ----
     def run():
         report = router.route(spec.canonical_name, {"vitals": {"features": mapped.features}})
         return report
@@ -419,13 +510,7 @@ async def analyze_case(
     if len(passed) > 1:
         dq.append({"code": "latest_vitals_used", "message": "Several validated vitals exist; the most recent was used."})
 
-    basis = " and ".join(x.replace("_", " ") for x in available)
-    statement = (f"This assessment is based on available {basis}. "
-                 + " ".join(f"{m.replace('_', ' ').capitalize()} evidence was not available."
-                            for m in missing if m != "medical_history" or not history)
-                 ).strip()
-    statement += (" Medical history is shown for clinician context; the model did not use it."
-                  if history else "")
+    statement = _basis(available, missing, history, scans)
 
     audit_event("analysis.run", "success", request=request, model_version=card.get("model_version"), **actor)
 
@@ -450,9 +535,11 @@ async def analyze_case(
                         "reliability": "Explains this model's behaviour only; it says nothing about causation "
                                        "and is only as meaningful as the model itself."},
         "model": {"name": card.get("model_name"), "version": card.get("model_version"), "status": model_status,
+                  "federated": False, "label": "NON-CLINICAL DEMO MODEL \u2014 not federated, not hospital-trained",
                   "training_status": card.get("training_status"), "source": VITALS_MODEL_INFO.to_dict()},
+        "non_clinical": True,
         "data_quality_warnings": dq,
-        "warnings": warnings,
+        "warnings": warnings + ([{"code": "registry_unreachable", "message": f"{registry_note}; the demo model was used because it is explicitly enabled."}] if registry_note else []),
         "urgent_review_flags": [],   # no clinical rule engine exists; none are invented
         "stub_or_fallback": model_status in ("STUB", "FALLBACK", "UNAVAILABLE"),
     }

@@ -38,8 +38,9 @@ authenticated but wrong role, wrong service, wrong endpoint or wrong hospital �
 | M2 `POST /validate/vitals`, `/validate/vitals/csv` | Module 1 | scoped service token (`aud=module2:validate`, `sub=module1`), minted per upload from the uploader's JWT hospital | body/form `hospital_id`, if sent, must equal token `hid` (else 403); token must be single-hospital | **from token** | **Internal** |
 | M2 `GET /health` | probes | none | — | none | Internal |
 | M7 `GET /admin/rounds`, `/admin/flags`, `/admin/overview`, `PATCH /admin/hospitals/{id}`, `POST /admin/rounds/trigger` | super_admin | JWT (cookie or bearer) | role must be `super_admin` | platform | Public API (admin) |
-| M7 `POST /admin/flags` | Module 2 | static key `FEDHEAL_SVC_KEY_M2_M7` | key identifies the caller only | **none** (body names the hospital) | **Internal** |
-| M7 `POST /admin/rounds` | Module 3 | static key `FEDHEAL_SVC_KEY_M3_M7` | key identifies the caller only | none (global round stats) | **Internal** |
+| M7 `POST /admin/flags` | Module 2 | signed token (`FEDHEAL_SVC_SIGNING_KEY_M2_M7`, aud `module7:flag-report`, 60 s) | caller + audience + expiry | **hospital-scoped**: token `hid` must equal the flag's hospital, else 403 | **Internal** |
+| M7 `POST /admin/rounds`, `POST /admin/models/candidates` | Module 3 | signed token (`FEDHEAL_SVC_SIGNING_KEY_M3_M7`, aud `module7:round-report` / `module7:model-candidate`) | caller + audience + expiry | platform-level aggregates only (`hid="*"`) | **Internal** |
+| M7 `GET /admin/models/promoted` | Module 8 | signed token (`FEDHEAL_SVC_SIGNING_KEY_M8_M7`, aud `module7:promoted-model`) | caller + audience + expiry | platform-level (weights + provenance, no patient data) | **Internal** |
 | M1 `GET /vitals` | any hospital-bound user | JWT | hospital from JWT only (no hospital parameter); super_admin without a hospital → 400 | own hospital | Public API |
 | M1 `GET /vitals/{id}` | any user (Module 8 forwards the user's own JWT) | JWT | other hospital's record → 403 + `cross_tenant.attempt` audit | own hospital | Public API |
 | M8 `POST /synthesize/record` | any logged-in user | JWT (cookie or bearer); forwarded to Module 1 to read the record | tenancy decided by Module 1; only `passed` records | own hospital (via Module 1) | Public API (authenticated) |
@@ -87,8 +88,9 @@ the session cookie is always `Secure`. Development falls back to clearly named
 | `FEDHEAL_SVC_SIGNING_KEY_M3_M1` | M1 (verify), M3 operator (mint) |
 | `FEDHEAL_SVC_TOKEN_M3_M1` | one hospital's M3 client (pre-minted, hospital-scoped) |
 | `FEDHEAL_SVC_SIGNING_KEY_M1_M2` | M1 (mint), M2 (verify) |
-| `FEDHEAL_SVC_KEY_M2_M7` | M2 → M7 |
-| `FEDHEAL_SVC_KEY_M3_M7` | M3 → M7 |
+| `FEDHEAL_SVC_SIGNING_KEY_M2_M7` | M2 → M7 |
+| `FEDHEAL_SVC_SIGNING_KEY_M3_M7` | M3 → M7 |
+| `FEDHEAL_SVC_SIGNING_KEY_M8_M7` | M8 → M7 |
 | `FEDHEAL_DASHBOARD_ORIGIN` | M1, M7, M8 (CORS) |
 
 The old `FEDHEAL_SVC_KEY_M3_M1` is retired; setting it now only logs a warning.
@@ -126,18 +128,22 @@ See the final report of the hardening task; the main ones are listed there
 (open self-registration, static M2→M7 / M3→M7 keys with no tenant scope,
 in-memory login rate limiting, no revocation list for individual tokens).
 
-## P0 clinical-workflow additions (2026-10-06)
+## P0 clinical-workflow additions (2026-10-06/07)
 
 | Control | State |
 |---|---|
+| Public self-registration | **Closed by default** (`FEDHEAL_ALLOW_PUBLIC_REGISTRATION=true` re-opens it, development only). Onboarding: super_admin → hospital + hospital_admin → hospital_admin creates doctors |
 | Doctor creation by hospital_admin, own hospital only (foreign `hospital_id` → 403 + audit) | Implemented, tested |
 | Disabled accounts: login refused and existing tokens rejected | Implemented, tested |
-| Cases / history / case vitals / reviews scoped to the caller's hospital; other hospital → 403 + `cross_tenant.attempt` audit | Implemented, tested both directions on every sub-resource |
-| Admins have no patient-level access (cases are `clinician` only) | Implemented, tested |
-| Audit events for case/history/vitals/review/analysis/model lifecycle carry ids only | Implemented, tested (no note/history text in logs) |
-| Input limits on history (50 items × 200 chars, notes 2000), patient_ref pattern | Implemented |
-| Registry refuses raw-data-shaped payloads | Implemented, tested |
+| Cases / history / scans / case vitals / reviews scoped to the caller's hospital; other hospital → 403 + `cross_tenant.attempt` audit | Implemented, tested both directions on every sub-resource, and across the real M1/M2/M8 services |
+| Admins have no patient-level access (clinical data is `clinician` only) | Implemented, tested |
+| Service-to-service: scoped signed tokens for M2→M7 (per hospital), M3→M7, M8→M7; static shared keys removed | Implemented, tested (wrong key, wrong audience, expiry, hospital mismatch) |
+| Audit events carry ids only (no history/note/vitals/scan content) | Implemented, tested |
+| Scan upload: extension allow-list, magic-byte sniffing, declared-MIME check, size cap, server-generated paths, hospital-scoped, ids-only audit | Implemented, tested; files are stored unencrypted on local disk |
+| Registry refuses raw-data-shaped payloads and verifies weights against their hash | Implemented, tested |
+| Demo model only behind an explicit flag, labelled NON-CLINICAL | Implemented, tested |
 
-Known gaps: open self-registration (`POST /register`) remains; the new case endpoints have no request-size
-middleware entry or rate limiting; no scan upload exists so no upload-validation surface; login/logout
-audit exists but "report viewed" and "case access" for analysis are logged only as `analysis.run`.
+Known gaps: no rate limiting beyond `/token`; no malware scanning or image re-encoding of uploads;
+`/cases/*` JSON bodies are bounded by field validation rather than the body-size middleware;
+scans are not encrypted at rest; TLS is not implemented (see FEDERATED_PRIVACY.md); the bootstrap
+super_admin password is passed via environment; no password reset flow.

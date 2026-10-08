@@ -47,12 +47,16 @@ import hospitals_client
 import models
 import schemas
 from audit import audit_event
-from auth import get_raw_token, require_module2_service_key, require_module3_service_key, require_super_admin
+import service_auth
+from auth import get_raw_token, require_flag_report, require_round_report, require_super_admin
 from database import Base, engine, get_db
 from docs_theme import mount_custom_docs
 import model_registry
 
-Base.metadata.create_all(bind=engine)
+# Local tiers (development/test) create tables on import for zero-setup runs. Staging/production must run
+# `alembic upgrade head` (the Dockerfile does) so schema changes are reviewed migrations, not import side effects.
+if config.is_local():
+    Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="FedHeal Admin/Platform Service", version="0.1.0", docs_url=None)
 mount_custom_docs(app, accent="#7c3fc9", accent_soft="#efe3fc")  # purple — Module 7
@@ -113,7 +117,7 @@ async def set_hospital_status(
 def report_round(
     payload: schemas.TrainingRoundIn,
     db: Session = Depends(get_db),
-    _=Depends(require_module3_service_key),
+    _=Depends(require_round_report),
 ):
     record = models.TrainingRound(**payload.model_dump())
     db.add(record)
@@ -169,8 +173,14 @@ def trigger_round(request: Request, admin: dict = Depends(require_super_admin)):
 def report_flag(
     payload: schemas.ValidationFlagIn,
     db: Session = Depends(get_db),
-    _=Depends(require_module2_service_key),
+    claims=Depends(require_flag_report),
+    request: Request = None,
 ):
+    # The credential names ONE hospital; a flag about any other hospital is refused (no unscoped cross-tenant reporting).
+    if service_auth.hospital_scope(claims) != payload.hospital_id:
+        audit_event("service_authz.failure", "denied", request=request, actor_service="module2",
+                    reason="hospital_scope_mismatch", resource_type="flag")
+        raise HTTPException(status_code=403, detail="Credential is not authorized for this hospital")
     record = models.ValidationFlag(**payload.model_dump())
     db.add(record)
     db.commit()

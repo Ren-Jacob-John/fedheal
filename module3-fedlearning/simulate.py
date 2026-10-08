@@ -27,6 +27,9 @@ import os
 import httpx
 import numpy as np
 
+import federation_registry
+import service_auth
+
 import config
 from client import HospitalClient
 from data import load_full_dataset, partition_for_hospitals, train_test_split_per_hospital
@@ -42,7 +45,6 @@ N_ROUNDS = 8
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
 # Module 3 -> Module 7 round reports. Required in staging/production; the
 # dev-only fallback matches Module 7's own dev fallback.
-ADMIN_SERVICE_KEY = config.get_secret("FEDHEAL_SVC_KEY_M3_M7", dev_default="dev-only-key-module3-to-module7")
 
 
 def report_round_to_admin(round_number: int, n_hospitals: int,
@@ -57,7 +59,7 @@ def report_round_to_admin(round_number: int, n_hospitals: int,
                 "baseline_accuracy": baseline_accuracy,
                 "notes": "reported by simulate.py",
             },
-            headers={"X-Service-Key": ADMIN_SERVICE_KEY},
+            headers=federation_registry.admin_headers(service_auth.AUD_ROUND_REPORT),
             timeout=2.0,
         )
     except httpx.HTTPError:

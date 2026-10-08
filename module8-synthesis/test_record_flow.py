@@ -198,10 +198,12 @@ def test_models_status_reports_stub_and_fallback_flags():
     assert client.get("/models/status").status_code == 401
 
 
-def test_demo_model_is_off_by_default_outside_local(monkeypatch):
+def test_demo_model_requires_an_explicit_flag_in_every_environment(monkeypatch):
     import model_provider
     monkeypatch.setenv("FEDHEAL_ENV", "production")
     monkeypatch.delenv("FEDHEAL_ALLOW_DEMO_MODEL", raising=False)
     assert model_provider.demo_model_allowed() is False
+    monkeypatch.setenv("FEDHEAL_ENV", "development")
+    assert model_provider.demo_model_allowed() is False      # no implicit development default any more
     monkeypatch.setenv("FEDHEAL_ALLOW_DEMO_MODEL", "true")
     assert model_provider.demo_model_allowed() is True

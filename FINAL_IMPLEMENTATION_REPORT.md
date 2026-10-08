@@ -1,76 +1,35 @@
-# FedHeal — Implementation Report (INTERIM, 2026-10-06)
+# FedHeal — Implementation Report (INTERIM, 2026-10-07)
 
-This is an honest interim report, not a "done" declaration. The Definition of Done is **not** fully met
-(see Known Limitations).
+An honest status, not a "done" declaration. Items are labelled IMPLEMENTED / PARTIAL / NOT IMPLEMENTED.
 
-## Completed
-- Audit → `docs/IMPLEMENTATION_STATUS.md` (+ §12 post-P0 table).
-- Hospital isolation extended to all new entities; tested A→B and B→A on every case sub-resource.
-- Hospital admin → doctor create / list / disable (own hospital only; foreign `hospital_id` → 403, audited);
-  disabled accounts cannot log in and existing tokens stop working.
-- Patient Case / Encounter (Alembic 0003, indexed), structured Medical History (upsert, bounded), vitals
-  linked to cases (validated by Module 2, rejects not stored), Clinician Review
-  (`ACCEPTED|OVERRIDDEN|NEEDS_MORE_DATA`, never used as training labels).
-- `POST /cases/{id}/analyze` (Module 8): modalities available/missing, model status
-  (`UNAVAILABLE|STUB|FALLBACK`), uncertainty, SHAP explanation, `INSUFFICIENT_DATA` / `MODEL_UNAVAILABLE`,
-  safety banner, `clinician_review_required: true`; no treatment/dosage content.
-- Model registry in Module 7: candidate → validation gate (integrity, participation, data quality, minimum
-  metrics, beats-majority baseline, regression vs deployed, cross-site gap) → explicit super_admin
-  promotion → rollback; registry refuses raw-data-shaped payloads.
-- Module 3 exports the federated global model (sha256 of weights) and registers an aggregate-only candidate.
-- Doctor dashboard workflow (Cases / Doctors tabs) with loading, error, empty and unauthorized states.
-- CI now runs Module 3 tests; integration job installs Modules 3 and 7.
-- Docs: MODEL_STATUS, FEDERATED_PRIVACY, MVP_SCOPE, TESTING, API, ARCHITECTURE, DEMO_RUNBOOK, SECURITY additions.
+## IMPLEMENTED
+- **Onboarding:** super_admin → hospital → hospital_admin → doctors (create / list / disable, own hospital only; foreign `hospital_id` → 403, audited). **Public self-registration is closed by default** (`FEDHEAL_ALLOW_PUBLIC_REGISTRATION`). Disabled accounts cannot log in and their tokens stop working.
+- **Clinical data:** cases (Alembic 0003, indexed), structured medical history, vitals linked to cases (validated by Module 2, rejects never stored), clinician review (`ACCEPTED|OVERRIDDEN|NEEDS_MORE_DATA`; never a training label), scan upload (0004).
+- **Tenancy:** derived from the authenticated user; other hospital's case → 403 + audit on every sub-resource. Hospital admins and super_admin have no patient-level access. Verified A→B and B→A, also through the real M1+M2+M8 services.
+- **Analysis (`POST /cases/{id}/analyze`, Module 8):** condition only from case metadata (`CONDITION_NOT_SET` otherwise); only available modalities used; `INSUFFICIENT_DATA` with the named missing inputs; `MODEL_UNAVAILABLE` when no model/registry; unsupported-scan conditions → explicit unavailable; model status/provenance/federated flag in every report; safety banner; `clinician_review_required: true`; no treatment/dosage/diagnosis text.
+- **Promoted federated model → inference:** Module 8 reads the promoted model from the registry, re-hashes the weights, and serves it (≤5 s cache). The demo fallback exists only behind `FEDHEAL_ALLOW_DEMO_MODEL=true`, is labelled NON-CLINICAL DEMO, and is never used silently when the registry is down. Proven end to end with the demo flag OFF; the prediction is reproduced from the registry's weights.
+- **Federation:** real two-hospital run (public UCI data seeded through Modules 1/2), local training on each hospital's own validated records, FedAvg, pooled-holdout evaluation, aggregate-only candidate. Raw data never leaves Module 1; client outputs and the registry are tested to hold only weights/aggregates; the registry refuses patient-like fields and re-derives the weight hash.
+- **Registry (Module 7, Alembic 0001):** candidate → gate (integrity, participation, data quality, minimum metrics, beats-majority-baseline, regression vs deployed, cross-site gap) → explicit super_admin promotion → rollback; a failed/regressing candidate preserves the production model.
+- **Service-to-service auth:** static shared keys replaced by short-lived signed tokens with a key per hop (caller, audience, hospital scope, expiry). Module 2→7 flags are hospital-scoped (mismatch → 403).
+- **Migrations / deployment:** Alembic for Modules 1 and 7 (zero model drift; coexist in one DB via separate version tables; Dockerfile runs `alembic upgrade head`); M7 `create_all` only in local tiers. Compose gained health checks and startup ordering (`depends_on: service_healthy`).
+- **Dashboard:** Cases / Doctors tabs: create case, vitals, history, scan upload, run analysis, report (modalities, model status, provenance, explanation, warnings), clinician review; loading/error/empty/unauthorized states. `npm run build` succeeds.
+- **CI** runs Module 3 tests; integration job installs Modules 3 and 7.
 
-## Modified files (important)
-`module1-auth/{models.py,main.py,migrations/versions/0003_*.py,test_security.py}` ·
-`module7-admin/{models.py,main.py}` · `module8-synthesis/main.py` ·
-`module3-fedlearning/simulate_real.py` · `module{1,2,7,8}/audit.py` (allow-list: case_id, resource_type,
-resource_id, model_version) · `module4-dashboard-react/src/{App.jsx,api.js,components/TopHUD.jsx,styles/app.css}` ·
-`.github/workflows/ci.yml` · `.gitignore` · `README.md` · `docs/IMPLEMENTATION_STATUS.md`, `docs/SECURITY.md`.
+## PARTIAL
+- **Scans:** stored and linked with strict validation; **no analysis exists** (no validated imaging model). Files are unencrypted on local disk.
+- **Federated privacy:** raw-data isolation implemented; **TLS, update clipping, differential privacy, secure aggregation are NOT implemented** (stated in every candidate's metadata and in docs/FEDERATED_PRIVACY.md). FedAvg is not formal privacy protection.
+- **Model quality:** the recorded real run (2 hospitals, public UCI, 3 informative features) scored 0.591 on n=44 (majority floor 0.545) and was **rejected by the default gate**. It is promoted only under an explicitly relaxed test policy, to prove the wiring. Gate metrics are self-reported by the training side. Nothing here generalises to hospital patients.
+- **Tests:** no browser E2E (Playwright). The "dashboard completes the workflow" criterion is covered by the same API calls in `tests/integration/test_doctor_workflow.py` plus a successful build — not a browser run.
 
-## New files
-`module1-auth/{cases.py,test_cases.py}` · `module7-admin/{model_registry.py,test_model_registry.py}` ·
-`module8-synthesis/test_case_analysis.py` · `module3-fedlearning/{federation_registry.py,test_federation_registry.py}` ·
-`module4-dashboard-react/src/components/CasesView.jsx` ·
-`tests/integration/{test_doctor_workflow.py,test_federation_flow.py}` · the new docs listed above.
+## NOT IMPLEMENTED
+Image/lab analysis; temperature/SpO2/respiratory-rate vitals (would change model dimension and M2 schema); persisted AI-analysis records (reviews are not bound to a specific analysis); password reset/invite; TLS; Docker/Compose run, Postgres run, clean-machine install; demo recording and screenshots; rate limiting beyond `/token`.
 
-## Tests (this environment, Python 3.12, `FEDHEAL_ENV=development`)
-Total: **372**  Passed: **372**  Failed: **0**  Skipped: **0**
-(M1 186 · M2 38 · M3 20 · M5 6 · M6 13 · M7 45 · M8 39 · root/integration 25). Baseline before this work: 283.
-Dashboard `npm run build` succeeds. Not run: Docker, Postgres, browser E2E.
-Two existing M1 CORS assertions were changed on purpose (PUT is now an allowed method for history upsert).
+## Tests (Python 3.12, SQLite, `FEDHEAL_ENV=development`)
+**408 passed, 0 failed, 0 skipped** — M1 199 · M2 38 · M3 20 · M5 6 · M6 13 · M7 53 · M8 51 · root/integration 28 (baseline before this work: 283). `npm run build` OK. Docker/Compose: **unverified** (YAML parses; health-check/ordering logic not exercised).
+Intentional changes to existing tests: CORS now allows PUT (history upsert); several M1 tests set `FEDHEAL_ALLOW_PUBLIC_REGISTRATION=true` because they exercise the open path's escalation guards; M8 tests set the explicit demo flag; M7/config tests use the new signing-key names; the e2e helper onboards via admin → doctor instead of `/register`.
 
-## AI models
-| Name | Version | Status | Dataset | Metrics | Limitations |
-|---|---|---|---|---|---|
-| xgboost-vitals-v1 (served) | uci-cleveland-demo-1 | FALLBACK | public UCI Cleveland | none claimed | 3 real features of 8; uncalibrated; not hospital-trained or federated |
-| vitals-fedavg-logreg (candidate) | v1 | REJECTED by gate in recorded run | public UCI via 2 seeded hospitals | acc 0.591, n=44, majority floor 0.545 | tiny holdout; not served for inference |
-| All imaging / foundation specialists | — | STUB / UNAVAILABLE | none | none | need torch, weights, validation data |
+## Modified (important)
+M1: `models.py`, `main.py`, `cases.py` (new), migrations 0003/0004 · M2: `main.py` · M3: `simulate*.py`, `federation_registry.py` (new), `seed_uci_heart.py` · M4: `CasesView.jsx` (new), `api.js`, `App.jsx`, `TopHUD.jsx`, `app.css` · M7: `models.py`, `auth.py`, `main.py`, `model_registry.py` (new), `migrations/` (new), Dockerfile · M8: `main.py`, `promoted_model.py` (new), `model_provider.py` · shared `service_auth.py` (×5), `audit.py` (×4) · `docker-compose.yml`, `deploy/compose.env.example`, `.env.example` files, CI, docs.
 
-## Federated learning
-Two hospitals (seeded from public data through Module 1/2), local training on each hospital's own validated
-records, weighted FedAvg, pooled-holdout evaluation, candidate registration, validation gate, human promotion.
-Raw data never leaves Module 1; the registry and client outputs are tested to hold aggregates/weights only.
-
-## Security
-Authentication: JWT + disabled-account checks. Authorization: RBAC + hospital tenancy on all new endpoints.
-Upload security: only existing vitals limits (no scan upload exists). Audit logging: ids only, tested.
-TLS: **not implemented**. Differential privacy: **not implemented**. Update clipping: **not implemented**.
-Secure aggregation: **not implemented**.
-
-## Known limitations (be skeptical of anything not listed as done)
-1. No scan/image upload or image inference. No lab data. Temperature/SpO2/respiratory rate are not supported (Module 2 schema).
-2. No federated or registry model is served for inference; analysis uses the FALLBACK demo model.
-3. Medical history is shown as context; **it is not a model input**.
-4. AI analyses are computed on request and not persisted; reviews are not tied to a specific analysis.
-5. The only recorded federated candidate was REJECTED by the gate; promotion/rollback are proven with synthetic metrics in unit tests, not with a passing real model.
-6. Gate thresholds are engineering defaults; metrics are self-reported by Module 3.
-7. Module 7 has no Alembic migrations. Open self-registration remains. New case endpoints lack request-size middleware and rate limits.
-8. Docker Compose, Postgres, and a clean-machine install were not run. No browser E2E (Playwright). No demo recording or screenshots.
-9. Flower traffic is plaintext; the federation server sees individual updates.
-
-## Future work
-Scan upload (+DICOM/PACS), image models with validated weights, more diseases, stronger privacy (TLS, clipping,
-DP, secure aggregation), serving promoted models, persisted analyses, browser E2E, production deployment,
-larger datasets, regulatory/compliance work.
+## Known limitations / risks
+Demo and gate thresholds are engineering defaults, not clinical criteria. `DEPLOYED` means "passed this platform's gate and was promoted", never "clinically validated". The `/cases/*` JSON endpoints rely on field validation rather than the body-size middleware. The Flower channel is plaintext. The aggregation server sees each hospital's individual update.

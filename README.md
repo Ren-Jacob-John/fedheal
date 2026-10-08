@@ -246,8 +246,11 @@ first setup:
 | `FEDMED_JWT_SECRET` | Module 1, 7, 8 | Modules 7 and 8 only verify tokens Module 1 issues |
 | `FEDHEAL_SVC_SIGNING_KEY_M3_M1` | Module 1; Module 3 **operator** only | Module 1 verifies hospital-scoped tokens with it; the operator's `simulate_real.py` mints them. Hospitals hold a scoped **token** (`FEDHEAL_SVC_TOKEN_M3_M1`), never this key |
 | `FEDHEAL_SVC_SIGNING_KEY_M1_M2` | Module 1, Module 2 | Module 1 mints a per-upload token for Module 2; Module 2 verifies it |
-| `FEDHEAL_SVC_KEY_M2_M7` | Module 2, Module 7 | lets Module 2 post rolled-up validation flags |
-| `FEDHEAL_SVC_KEY_M3_M7` | Module 3, Module 7 | lets Module 3 post round/accuracy history |
+| `FEDHEAL_SVC_SIGNING_KEY_M2_M7` | Module 2, Module 7 | signs hospital-scoped flag-report tokens |
+| `FEDHEAL_SVC_SIGNING_KEY_M3_M7` | Module 3, Module 7 | signs round-report and model-candidate tokens (aggregates only) |
+| `FEDHEAL_SVC_SIGNING_KEY_M8_M7` | Module 8, Module 7 | signs tokens Module 8 uses to read the promoted model |
+| `FEDHEAL_ALLOW_PUBLIC_REGISTRATION` | Module 1 | `true` re-opens self-registration (development only; default closed) |
+| `FEDHEAL_ALLOW_DEMO_MODEL` | Module 8 | `true` allows the NON-CLINICAL demo fallback when no model is promoted (default off everywhere) |
 | `FEDHEAL_DASHBOARD_ORIGIN` | Module 1, 7, 8 | must equal the dashboard's real origin (default `http://localhost:5173`) so CORS allows it |
 
 For a first local run, the `.env.example` defaults already agree with
@@ -382,8 +385,7 @@ Hospital admin → create doctor → doctor creates a patient case → vitals (v
 AI analysis (clinical decision support, clinician review required) → clinician review → two-hospital federated
 training → candidate model → validation gate → explicit promotion / rollback.
 
-What is real and what is not, in one place: **docs/MODEL_STATUS.md** (the served model is a labelled
-FALLBACK demo fit on public UCI data and is not clinically validated), **docs/FEDERATED_PRIVACY.md**
+What is real and what is not, in one place: **docs/MODEL_STATUS.md** (analysis serves the PROMOTED federated model; with none promoted it answers `MODEL_UNAVAILABLE`, unless the explicit NON-CLINICAL demo fallback is enabled; nothing is clinically validated), **docs/FEDERATED_PRIVACY.md**
 (raw-data isolation is implemented; TLS, clipping, differential privacy and secure aggregation are not),
 **docs/MVP_SCOPE.md** (what is deliberately not done), and **FINAL_IMPLEMENTATION_REPORT.md**.
 Step-by-step demo: **docs/DEMO_RUNBOOK.md**. Tests: **docs/TESTING.md**. API: **docs/API.md**.

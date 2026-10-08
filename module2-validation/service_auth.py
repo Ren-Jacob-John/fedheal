@@ -2,8 +2,8 @@
 Service-to-service credentials that can express WHO is calling and WHICH
 HOSPITAL they may act for.
 
-CANONICAL COPY: duplicated verbatim into module1-auth, module2-validation
-and module3-fedlearning (see config.py's note; tests/test_shared_files_in_sync.py
+CANONICAL COPY: duplicated verbatim into module1-auth, module2-validation,
+module3-fedlearning, module7-admin and module8-synthesis (see config.py's note; tests/test_shared_files_in_sync.py
 enforces it).
 
 Why this exists
@@ -47,6 +47,14 @@ ANY_HOSPITAL = "*"
 AUD_VITALS_EXPORT = "module1:vitals-export"
 AUD_HOSPITAL_DIRECTORY = "module1:hospital-directory"
 AUD_VALIDATE = "module2:validate"
+# Module 7 (platform admin) inbound families. Flag reports are per-hospital; the rest are platform-level.
+AUD_FLAG_REPORT = "module7:flag-report"        # M2 -> M7, hid = the hospital the flags are about
+AUD_ROUND_REPORT = "module7:round-report"      # M3 -> M7, aggregate round stats (hid "*")
+AUD_MODEL_CANDIDATE = "module7:model-candidate"  # M3 -> M7, aggregate candidate description (hid "*")
+AUD_PROMOTED_MODEL = "module7:promoted-model"  # M8 -> M7, read the promoted global model (hid "*")
+
+# Audiences that are platform-level by nature (no single tenant); everything else must name one hospital.
+WILDCARD_AUDIENCES = frozenset({AUD_HOSPITAL_DIRECTORY, AUD_ROUND_REPORT, AUD_MODEL_CANDIDATE, AUD_PROMOTED_MODEL})
 
 
 def mint_service_token(
@@ -58,10 +66,10 @@ def mint_service_token(
     ttl_seconds: int = 300,
 ) -> str:
     """Mint a scoped service token. `hospital_id` may be ANY_HOSPITAL only
-    for AUD_HOSPITAL_DIRECTORY (listing); export/validate tokens must name
-    exactly one hospital."""
-    if hospital_id == ANY_HOSPITAL and audience != AUD_HOSPITAL_DIRECTORY:
-        raise ValueError("a wildcard hospital scope is only valid for the hospital directory")
+    for the platform-level audiences in WILDCARD_AUDIENCES; export, validate
+    and flag-report tokens must name exactly one hospital."""
+    if hospital_id == ANY_HOSPITAL and audience not in WILDCARD_AUDIENCES:
+        raise ValueError("a wildcard hospital scope is only valid for platform-level audiences")
     now = int(time.time())
     claims = {
         "iss": ISSUER,

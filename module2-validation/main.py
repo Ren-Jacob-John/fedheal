@@ -52,7 +52,8 @@ mount_custom_docs(app, accent="#1f9d63", accent_soft="#dcf5e8")  # green — Mod
 # never patient data" design.
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
 # Module 2 -> Module 7 flag reports (outbound). Required in staging/production.
-ADMIN_SERVICE_KEY = config.get_secret("FEDHEAL_SVC_KEY_M2_M7", dev_default="dev-only-key-module2-to-module7")
+ADMIN_SIGNING_KEY = config.get_secret("FEDHEAL_SVC_SIGNING_KEY_M2_M7", dev_default="dev-only-signing-key-module2-to-module7")
+config.warn_if_set("FEDHEAL_SVC_KEY_M2_M7", "FEDHEAL_SVC_SIGNING_KEY_M2_M7 (hospital-scoped tokens)")
 
 # ---- Inbound access control ------------------------------------------------
 # This service is INTERNAL: the browser talks to Module 1, and Module 1
@@ -135,7 +136,10 @@ def report_flags_to_admin(hospital_id: str | None, results: list["ValidationResu
             httpx.post(
                 f"{ADMIN_API_URL}/admin/flags",
                 json={"hospital_id": hospital_id, "status": status, "reason": reason, "count": count},
-                headers={"X-Service-Key": ADMIN_SERVICE_KEY},
+                # Scoped to THIS hospital: Module 7 refuses a flag about any other tenant.
+                headers={"X-Service-Key": service_auth.mint_service_token(
+                    ADMIN_SIGNING_KEY, caller="module2", audience=service_auth.AUD_FLAG_REPORT,
+                    hospital_id=hospital_id, ttl_seconds=60)},
                 timeout=2.0,
             )
         except httpx.HTTPError:

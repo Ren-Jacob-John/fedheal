@@ -27,6 +27,7 @@ import pytest
 # database.py reads FEDHEAL_DATABASE_URL at import time.
 _TEST_DB_PATH = f"./_test_auth_{uuid.uuid4().hex}.db"
 os.environ["FEDHEAL_DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
+os.environ["FEDHEAL_ALLOW_PUBLIC_REGISTRATION"] = "true"  # these tests are about the open path's escalation guards
 
 import database  # noqa: E402
 import models  # noqa: E402

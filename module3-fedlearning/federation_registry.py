@@ -18,9 +18,17 @@ import httpx
 import numpy as np
 
 import config
+import service_auth
 
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
 MODEL_NAME = "vitals-fedavg-logreg"
+
+
+def admin_headers(audience: str) -> dict:
+    """Short-lived platform-level token for Module 7 (no single hospital: aggregates only)."""
+    key = config.get_secret("FEDHEAL_SVC_SIGNING_KEY_M3_M7", dev_default="dev-only-signing-key-module3-to-module7")
+    return {"X-Service-Key": service_auth.mint_service_token(
+        key, caller="module3", audience=audience, hospital_id=service_auth.ANY_HOSPITAL, ttl_seconds=60)}
 
 
 def artifact_hash(params: list[np.ndarray]) -> str:
@@ -52,7 +60,8 @@ def verify_artifact(path: str | os.PathLike, expected_hash: str) -> bool:
 def build_candidate_payload(*, condition: str, training_round: int, hospital_labels: list[str],
                             global_accuracy: float, n_eval: int, per_hospital_accuracy: dict[str, float],
                             local_only_baseline: float, majority_class_floor: float | None,
-                            digest: str, provenances: list, data_source: str) -> dict:
+                            digest: str, provenances: list, data_source: str,
+                            params: list | None = None, input_spec: dict | None = None) -> dict:
     """Aggregate-only candidate description. Attestations are DERIVED, not asserted:
     labels_from_hospital_only is True only if no hospital's labels were placeholders."""
     clean = all(getattr(p, "is_clean", False) for p in provenances)
@@ -82,15 +91,19 @@ def build_candidate_payload(*, condition: str, training_round: int, hospital_lab
             **({"majority_class_floor": float(majority_class_floor)} if majority_class_floor is not None else {}),
         },
         "artifact_hash": digest,
+        # The weights themselves (9 numbers) so the platform can serve the model once it is promoted.
+        # Model parameters are not patient data; Module 7 re-derives the hash from them and refuses a mismatch.
+        **({"parameters": {"coef": np.asarray(params[0]).tolist(), "intercept": np.asarray(params[1]).tolist()}}
+           if params is not None else {}),
+        **({"input_spec": input_spec} if input_spec is not None else {}),
     }
 
 
 def register_candidate(payload: dict, *, timeout: float = 5.0) -> dict | None:
     """POST to Module 7 with the per-hop service key. Returns the stored row or None if unreachable."""
-    key = config.get_secret("FEDHEAL_SVC_KEY_M3_M7", dev_default="dev-only-key-module3-to-module7")
     try:
         r = httpx.post(f"{ADMIN_API_URL}/admin/models/candidates", json=payload,
-                       headers={"X-Service-Key": key}, timeout=timeout)
+                       headers=admin_headers(service_auth.AUD_MODEL_CANDIDATE), timeout=timeout)
     except httpx.HTTPError:
         return None
     return r.json() if r.status_code == 201 else {"error": r.status_code, "detail": r.text[:300]}

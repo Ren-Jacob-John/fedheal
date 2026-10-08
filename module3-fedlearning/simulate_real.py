@@ -35,11 +35,15 @@ from fedavg import federated_average, run_local_only_baseline
 from data import train_test_split_per_hospital
 from model import build_model, get_model_parameters
 import federation_registry
+import service_auth
 from real_data import (
     load_real_partitions,
     carve_global_holdout,
     UnlabeledDataError,
     N_FEATURES,
+    FEATURE_KEYS,
+    _FEATURE_MEAN,
+    _FEATURE_STD,
 )
 
 MIN_RECORDS = 10
@@ -48,7 +52,6 @@ N_ROUNDS = 8
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
 # Module 3 -> Module 7 round reports. Required in staging/production; the
 # dev-only fallback matches Module 7's own dev fallback.
-ADMIN_SERVICE_KEY = config.get_secret("FEDHEAL_SVC_KEY_M3_M7", dev_default="dev-only-key-module3-to-module7")
 
 
 def parse_args() -> argparse.Namespace:
@@ -79,7 +82,7 @@ def report_round_to_admin(round_number: int, n_hospitals: int,
                 "baseline_accuracy": baseline_accuracy,
                 "notes": notes,
             },
-            headers={"X-Service-Key": ADMIN_SERVICE_KEY},
+            headers=federation_registry.admin_headers(service_auth.AUD_ROUND_REPORT),
             timeout=2.0,
         )
     except httpx.HTTPError:
@@ -195,7 +198,10 @@ def main():
             condition="heart_disease", training_round=N_ROUNDS, hospital_labels=list(hospital_names),
             global_accuracy=global_acc, n_eval=len(y_global_holdout), per_hospital_accuracy=per_hospital,
             local_only_baseline=baseline_acc, majority_class_floor=majority, digest=digest,
-            provenances=provenances, data_source="hospital_validated_vitals_via_module1")
+            provenances=provenances, data_source="hospital_validated_vitals_via_module1",
+            params=global_params,
+            input_spec={"feature_names": list(FEATURE_KEYS), "center": [float(v) for v in _FEATURE_MEAN],
+                        "scale": [float(v) for v in _FEATURE_STD]})
         stored = federation_registry.register_candidate(payload)
         if stored is None:
             print("\nModule 7 unreachable: candidate NOT registered (weights saved at "

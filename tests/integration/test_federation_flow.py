@@ -1,13 +1,21 @@
 """
 Two-hospital federated run against the real services, then the registry gate.
 
-  Module 1 + Module 2 + Module 7 as real processes (throwaway SQLite)
+  Module 1 + Module 2 + Module 7 + Module 8 as real processes (throwaway SQLite)
     -> seed_uci_heart.py uploads public UCI Cleveland records for TWO hospitals
        through Module 1's front door (so they pass Module 2's validation)
     -> simulate_real.py: each hospital trains locally, FedAvg aggregates,
        the global model is scored on a pooled holdout, a CANDIDATE is registered
     -> Module 7: candidate is NOT deployed; validation gate decides; only a
        passing model can be promoted by a super_admin.
+    -> Module 8 (demo fallback DISABLED): refuses to analyse before promotion,
+       and after promotion serves exactly the promoted model with its provenance.
+
+Module 7 here runs with a deliberately RELAXED gate policy (FEDHEAL_GATE_* below) so the
+small public-data run can be promoted and the promotion -> inference wiring can be
+tested. Under the default policy the same run is rejected (see docs/MODEL_STATUS.md and
+module7-admin/test_model_registry.py). The relaxed policy is a test setting, not a claim
+that this model is good.
 
 Data is public UCI Cleveland data (3 real features) — a demo of the pipeline,
 NOT clinical evidence. This test asserts behaviour that holds whether or not the
@@ -24,6 +32,7 @@ import tempfile
 import httpx
 import pytest
 
+from test_doctor_workflow import VITALS, make_hospital_with_doctor
 from test_e2e_flow import ADMIN_PASSWORD, ROOT, Service, base_env, bearer, free_port, login
 
 M3 = ROOT / "module3-fedlearning"
@@ -32,7 +41,7 @@ M3 = ROOT / "module3-fedlearning"
 @pytest.fixture(scope="module")
 def fed():
     tmp = tempfile.mkdtemp(prefix="fedheal_fed_")
-    p1, p2, p7 = free_port(), free_port(), free_port()
+    p1, p2, p7, p8 = free_port(), free_port(), free_port(), free_port()
     m1_env = base_env(FEDHEAL_DATABASE_URL=f"sqlite:///{tmp}/auth.db", FEDHEAL_VALIDATION_API_URL=f"http://127.0.0.1:{p2}")
     subprocess.run([sys.executable, "-c", "import database, models; database.Base.metadata.create_all(bind=database.engine)"],
                    cwd=ROOT / "module1-auth", env=m1_env, check=True, timeout=60)
@@ -44,7 +53,14 @@ def fed():
         "m2": Service("module2", "module2-validation", p2, base_env(FEDHEAL_ADMIN_API_URL=f"http://127.0.0.1:{p7}"), tmp),
         "m7": Service("module7", "module7-admin", p7,
                       base_env(FEDHEAL_ADMIN_DATABASE_URL=f"sqlite:///{tmp}/admin.db",
-                               FEDHEAL_AUTH_API_URL=f"http://127.0.0.1:{p1}"), tmp),
+                               FEDHEAL_AUTH_API_URL=f"http://127.0.0.1:{p1}",
+                               # TEST-ONLY relaxed gate (see module docstring)
+                               FEDHEAL_GATE_MIN_ACCURACY="0.5", FEDHEAL_GATE_MIN_EVAL_EXAMPLES="30",
+                               FEDHEAL_GATE_MAX_HOSPITAL_GAP="0.6", FEDHEAL_GATE_MIN_MARGIN_OVER_MAJORITY="0.0"), tmp),
+        # Demo fallback explicitly OFF: any answer must come from the promoted federated model.
+        "m8": Service("module8", "module8-synthesis", p8,
+                      base_env(FEDHEAL_AUTH_API_URL=f"http://127.0.0.1:{p1}", FEDHEAL_ADMIN_API_URL=f"http://127.0.0.1:{p7}",
+                               FEDHEAL_ALLOW_DEMO_MODEL="false", FEDHEAL_PROMOTED_MODEL_CACHE_SECONDS="0"), tmp),
     }
     try:
         for s in services.values():
@@ -59,7 +75,18 @@ def fed():
         run = subprocess.run([sys.executable, "simulate_real.py"], cwd=M3, env=env,
                              capture_output=True, text=True, timeout=300)
         assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-1500:]
-        yield {"svc": services, "run": run, "tmp": tmp,
+        def promoted_headers():
+            sys.path.insert(0, str(ROOT / "module8-synthesis"))
+            try:
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("fed_service_auth", ROOT / "module8-synthesis" / "service_auth.py")
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+            finally:
+                sys.path.remove(str(ROOT / "module8-synthesis"))
+            return {"X-Service-Key": mod.mint_service_token("dev-only-signing-key-module8-to-module7", caller="module8",
+                                                            audience=mod.AUD_PROMOTED_MODEL, hospital_id="*")}
+        yield {"svc": services, "run": run, "tmp": tmp, "promoted_headers": promoted_headers,
                "admin": login(services["m1"], "admin@fed.fedheal.local", ADMIN_PASSWORD)}
     finally:
         for s in services.values():
@@ -108,21 +135,65 @@ def test_exported_weights_match_the_registered_hash(fed):
     assert fr.verify_artifact(os.path.join(fed["tmp"], "artifacts", files[0]), c["artifact_hash"])
 
 
-def test_gate_decides_and_only_a_passing_model_can_be_promoted(fed):
+def make_case_with_vitals(fed):
+    m1 = fed["svc"]["m1"]
+    sup = login(m1, "admin@fed.fedheal.local", ADMIN_PASSWORD)
+    w = make_hospital_with_doctor(m1, sup)
+    case = httpx.post(f"{m1.url}/cases", headers=bearer(w["doctor"]), timeout=30,
+                      json={"patient_ref": "PAT-DEMO-FED", "admission_reason": "synthetic", "current_condition": "heart_disease"}).json()
+    v = httpx.post(f"{m1.url}/cases/{case['id']}/vitals", headers=bearer(w["doctor"]), json={"record": VITALS}, timeout=30)
+    assert v.status_code == 200, v.text
+    return w["doctor"], case["id"]
+
+
+def test_before_promotion_inference_refuses_instead_of_using_a_demo_model(fed):
+    tok, cid = make_case_with_vitals(fed)
+    fed["case"] = (tok, cid)
+    r = httpx.post(f"{fed['svc']['m8'].url}/cases/{cid}/analyze", headers=bearer(tok), timeout=30)
+    assert r.status_code == 503 and r.json()["detail"]["status"] == "MODEL_UNAVAILABLE"
+
+
+def test_gate_passes_under_the_test_policy_and_a_super_admin_promotes(fed):
     m7, adm = fed["svc"]["m7"].url, bearer(fed["admin"])
     c = models_(fed)[0]
     v = httpx.post(f"{m7}/admin/models/{c['id']}/validate", headers=adm, timeout=20).json()
     names = {ch["name"]: ch["status"] for ch in v["validation_report"]["checks"]}
     assert set(names) == {"integrity", "participation", "data_quality", "minimum_metrics", "beats_majority_baseline",
-                     "regression", "fairness"}
+                          "regression", "fairness"}
     assert names["integrity"] == "PASS" and names["participation"] == "PASS" and names["data_quality"] == "PASS"
-    promote = httpx.post(f"{m7}/admin/models/{c['id']}/promote", json={}, headers=adm, timeout=20)
-    if v["validation_status"] == "PASSED":
-        assert promote.status_code == 200 and promote.json()["deployment_status"] == "DEPLOYED"
-    else:
-        assert v["deployment_status"] == "REJECTED" and promote.status_code == 409
-        cur = httpx.get(f"{m7}/admin/models/current",
-                        params={"model_name": c["model_name"], "condition": c["condition"]}, headers=adm, timeout=20)
-        assert cur.status_code == 404
-    print("\nGATE RESULT (public UCI demo data, not clinical):", json.dumps(v["validation_report"], indent=1))
-    print("metrics:", json.dumps(c["metrics"]))
+    assert v["validation_status"] == "PASSED", v["validation_report"]
+    p = httpx.post(f"{m7}/admin/models/{c['id']}/promote", json={}, headers=adm, timeout=20)
+    assert p.status_code == 200 and p.json()["deployment_status"] == "DEPLOYED" and p.json()["approved_by"]
+    print("\nmetrics (public UCI demo data, NOT clinical):", json.dumps(c["metrics"]))
+
+
+def test_inference_serves_exactly_the_promoted_model_with_provenance(fed):
+    tok, cid = fed["case"]
+    reg = models_(fed)[0]
+    r = httpx.post(f"{fed['svc']['m8'].url}/cases/{cid}/analyze", headers=bearer(tok), timeout=30)
+    assert r.status_code == 200, r.text
+    b = r.json()
+    m = b["model"]
+    assert m["federated"] is True and m["status"] == "DEPLOYED" and m["version"] == reg["version"]
+    assert m["provenance"]["artifact_hash"] == reg["artifact_hash"] and m["provenance"]["registry_id"] == reg["id"]
+    assert m["provenance"]["n_participating_hospitals"] == 2
+    assert b["stub_or_fallback"] is False and b["clinician_review_required"] is True and b["non_clinical"] is True
+    assert "DEMO" not in json.dumps(m)
+    assert b["explanation"]["method"] == "linear_contributions"
+    # the prediction is reproducible from the registry's weights (no hidden model)
+    import numpy as np
+    promoted = httpx.get(f"{fed['svc']['m7'].url}/admin/models/promoted", params={"condition": "heart_disease"},
+                         headers=fed["promoted_headers"](), timeout=20).json()
+    spec, coef = promoted["input_spec"], np.array(promoted["parameters"]["coef"][0])
+    x = (np.array([VITALS[n] for n in spec["feature_names"]], float) - np.array(spec["center"])) / np.array(spec["scale"])
+    z = float(coef @ x + promoted["parameters"]["intercept"][0])
+    got = sum(c["contribution"] for c in b["explanation"]["contributions"]) + b["explanation"]["base_value"]
+    assert abs(got - z) < 1e-9
+
+
+def test_rollback_without_a_previous_model_is_refused(fed):
+    c = models_(fed)[0]
+    r = httpx.post(f"{fed['svc']['m7'].url}/admin/models/rollback",
+                   params={"model_name": c["model_name"], "condition": c["condition"]},
+                   headers=bearer(fed["admin"]), timeout=20)
+    assert r.status_code == 409

@@ -310,3 +310,94 @@ class TestReview:
                         headers=bearer(world["doc_a"]))
         text = "\n".join(r.getMessage() for r in caplog.records)
         assert "clinician.review" in text and "QQQ" not in text
+
+
+# ---------------- onboarding: no uncontrolled public registration ----------------
+
+class TestRegistrationClosed:
+    def test_public_registration_is_refused_when_disabled(self, world, monkeypatch):
+        monkeypatch.setattr(main, "PUBLIC_REGISTRATION_ENABLED", False)
+        r = client.post("/register", json={"email": f"{sx.uid('x')}@demo.local", "password": "long-demo-password",
+                                           "hospital_id": world["ha"]})
+        assert r.status_code == 403
+
+    def test_default_configuration_is_closed(self):
+        import subprocess, sys, os, pathlib
+        env = {k: v for k, v in os.environ.items() if not k.startswith("FEDHEAL_ALLOW")}
+        env.update({"FEDHEAL_ENV": "development", "FEDHEAL_DATABASE_URL": "sqlite:////tmp/fedheal_reg_default.db"})
+        out = subprocess.run([sys.executable, "-c", "import main; print(main.PUBLIC_REGISTRATION_ENABLED)"],
+                             cwd=pathlib.Path(__file__).parent, env=env, capture_output=True, text=True, timeout=60)
+        assert out.stdout.strip().endswith("False"), out.stderr[-400:]
+
+
+# ---------------- scans: stored and linked, never analysed ----------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+JPG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+
+
+@pytest.fixture
+def scan_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("FEDHEAL_UPLOAD_STORAGE_PATH", str(tmp_path))
+    return tmp_path
+
+
+def _upload(token, cid, data=PNG, name="scan.png", ctype="image/png", scan_type="chest_xray"):
+    return client.post(f"/cases/{cid}/scans", headers=bearer(token), data={"scan_type": scan_type},
+                       files={"file": (name, data, ctype)})
+
+
+class TestScans:
+    def test_png_and_jpeg_are_stored_linked_and_marked_unanalysed(self, world, scan_dir):
+        cid = _case(world["doc_a"], "PAT-S-1").json()["id"]
+        for data, name, ctype in ((PNG, "a.png", "image/png"), (JPG, "b.JPG", "image/jpeg")):
+            r = _upload(world["doc_a"], cid, data, name, ctype)
+            assert r.status_code == 201, r.text
+            b = r.json()
+            assert b["status"] == "UPLOADED" and b["hospital_id"] == world["ha"] and b["case_id"] == cid
+            assert b["analysis"].startswith("UNAVAILABLE") and "file_reference" not in b
+        assert len(client.get(f"/cases/{cid}/scans", headers=bearer(world["doc_a"])).json()) == 2
+        files = [p for p in scan_dir.rglob("*") if p.is_file()]
+        assert len(files) == 2 and all(world["ha"] in p.parts and cid in p.parts for p in files)
+
+    def test_client_filename_never_becomes_a_path(self, world, scan_dir):
+        cid = _case(world["doc_a"], "PAT-S-2").json()["id"]
+        r = _upload(world["doc_a"], cid, PNG, "../../../etc/evil.png")
+        assert r.status_code == 201
+        assert all(scan_dir in p.parents for p in scan_dir.rglob("*") if p.is_file())
+        assert not any("evil" in p.name for p in scan_dir.rglob("*"))
+
+    @pytest.mark.parametrize("data,name,ctype,code", [
+        (b"just text", "x.png", "image/png", 422),             # wrong content behind an image extension
+        (PNG, "x.exe", "image/png", 422),                      # extension not allowed
+        (PNG, "x.png", "application/pdf", 422),                # declared MIME contradicts the bytes
+        (b"", "x.png", "image/png", 422),                      # empty
+        (JPG, "x.png", "image/jpeg", 201),                     # extension/content mismatch is normalised to the sniffed type
+        (b"GIF89a" + b"\x00" * 20, "x.png", "image/png", 422), # gif bytes
+    ])
+    def test_file_validation(self, world, scan_dir, data, name, ctype, code):
+        cid = _case(world["doc_a"], "PAT-S-3").json()["id"]
+        r = _upload(world["doc_a"], cid, data, name, ctype)
+        assert r.status_code == code, r.text
+        if code != 201:
+            assert r.json()["detail"]["status"] == "INVALID_FILE"
+
+    def test_oversized_and_bad_type(self, world, scan_dir, monkeypatch):
+        import cases
+        monkeypatch.setattr(cases, "MAX_SCAN_BYTES", 1000)
+        cid = _case(world["doc_a"], "PAT-S-4").json()["id"]
+        assert _upload(world["doc_a"], cid, PNG + b"\x00" * 2000).status_code == 413
+        assert _upload(world["doc_a"], cid, PNG, scan_type="mri_of_everything").status_code == 422
+        assert not [p for p in scan_dir.rglob("*") if p.is_file()]
+
+    def test_other_hospital_cannot_upload_or_list(self, world, scan_dir):
+        cb = _case(world["doc_b"], "PAT-S-5").json()["id"]
+        assert _upload(world["doc_a"], cb).status_code == 403
+        assert client.get(f"/cases/{cb}/scans", headers=bearer(world["doc_a"])).status_code == 403
+        assert [p for p in scan_dir.rglob("*") if p.is_file()] == []
+
+    def test_admins_and_anonymous_denied(self, world, scan_dir):
+        cid = _case(world["doc_a"], "PAT-S-6").json()["id"]
+        assert _upload(world["admin_a"], cid).status_code == 403
+        assert client.post(f"/cases/{cid}/scans", data={"scan_type": "chest_xray"},
+                           files={"file": ("a.png", PNG, "image/png")}).status_code == 401

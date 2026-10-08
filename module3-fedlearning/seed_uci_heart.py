@@ -170,9 +170,10 @@ def ensure_hospital(client: httpx.Client, auth_url: str, name: str, headers: dic
 
 
 def ensure_admin_token(client: httpx.Client, auth_url: str,
-                       hospital_id: str, email: str) -> str:
-    """Register the seed admin if needed, then log in and return a bearer token."""
-    reg = client.post(f"{auth_url}/register", timeout=10.0, json={
+                       hospital_id: str, email: str, super_headers: dict) -> str:
+    """Create the seed hospital_admin (super_admin-only endpoint; public registration is closed),
+    then log in and return a bearer token."""
+    reg = client.post(f"{auth_url}/admin/users", timeout=10.0, headers=super_headers, json={
         "email": email,
         "password": ADMIN_PASSWORD,
         "hospital_id": hospital_id,
@@ -273,7 +274,7 @@ def main() -> int:
             try:
                 hospital = ensure_hospital(client, args.auth_url, name, admin_headers)
                 token = ensure_admin_token(client, args.auth_url, hospital["id"],
-                                           ADMIN_EMAIL_TEMPLATE.format(n=n))
+                                           ADMIN_EMAIL_TEMPLATE.format(n=n), admin_headers)
             except httpx.HTTPError as e:
                 print(f"Could not reach Module 1 at {args.auth_url} — is it running? ({e})",
                       file=sys.stderr)

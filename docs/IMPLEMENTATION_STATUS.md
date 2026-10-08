@@ -271,21 +271,22 @@ The security pass (P0) and the M1→M8 integration pass are already present in t
 
 ---
 
-## 12. Update after P0 implementation (2026-10-06)
+## 12. Update after P0 implementation (2026-10-07)
 
 | Feature | Status | Existing Location | Required Change |
 |---|---|---|---|
-| Authentication | IMPLEMENTED | M1 `auth.py`, `main.py` | Disabled-account check added; open registration remains (decision needed) |
+| Authentication | IMPLEMENTED | M1 `auth.py`, `main.py` | Public registration closed by default; disabled accounts rejected. No password reset |
 | Hospital management | IMPLEMENTED | M1 `/hospitals` | None |
-| Doctor management | IMPLEMENTED (new) | M1 `cases.py` `/hospital/doctors` | Password reset / invite flow |
-| Patient Case | IMPLEMENTED (new) | M1 `models.Case`, `cases.py` | Delete/archive policy |
-| Medical history | IMPLEMENTED (new) | M1 `models.MedicalHistory` | Not a model input yet |
-| Vitals | IMPLEMENTED | M1 + M2; now linked via `case_id` | Temperature / SpO2 / resp. rate not in M2 schema |
-| Scan upload | MISSING | — | P1 |
-| AI inference | PARTIAL | M8 `/cases/{id}/analyze`, M5/M6 | Serve a registry-promoted model |
-| Explainability | IMPLEMENTED for vitals (SHAP) | M6/M8 | Image explainers are stubs |
-| Federated learning | PARTIAL | M3 + `federation_registry.py` | TLS, clipping, DP, secure aggregation absent |
-| Model registry | IMPLEMENTED (new) | M7 `model_registry.py` | M7 still uses `create_all`; no Alembic |
-| Clinician review | IMPLEMENTED (new) | M1 `/cases/{id}/review` | Not stored against a specific analysis |
-| Security | PARTIAL | see SECURITY.md | See known gaps there |
-| Testing | PARTIAL | see TESTING.md | No browser E2E; no clean-install/Docker run |
+| Doctor management | IMPLEMENTED | M1 `cases.py` `/hospital/doctors` | Invite / reset flow |
+| Patient Case | IMPLEMENTED | M1 `models.Case`, `cases.py` | Archive/delete policy |
+| Medical history | IMPLEMENTED | M1 `models.MedicalHistory` | Shown as context; not a model input |
+| Vitals | IMPLEMENTED | M1 + M2, linked via `case_id` | Temperature / SpO2 / resp. rate would change the model input dimension and M2 schema |
+| Scan upload | PARTIAL (store + link only) | M1 `cases.py` `/cases/{id}/scans`, migration 0004 | No analysis exists; no encryption at rest / malware scan |
+| AI inference | IMPLEMENTED for the promoted federated model | M8 `/cases/{id}/analyze`, `promoted_model.py` | Imaging/lab models do not exist |
+| Explainability | IMPLEMENTED (linear contributions for the promoted model; SHAP for the demo fallback) | M8 | Image explainers are stubs |
+| Federated learning | PARTIAL | M3 + `federation_registry.py` | No TLS, clipping, DP or secure aggregation |
+| Model registry | IMPLEMENTED | M7 `model_registry.py`, Alembic 0001 | Metrics are self-reported by the training side |
+| Clinician review | IMPLEMENTED | M1 `/cases/{id}/review` | Not stored against a specific analysis |
+| Service-to-service auth | IMPLEMENTED | `service_auth.py` ×5, M7 `auth.py` | mTLS / secrets manager for production |
+| Security | PARTIAL | `docs/SECURITY.md` | See known gaps there |
+| Testing | PARTIAL | `docs/TESTING.md` | No browser E2E; Docker/Postgres not run |

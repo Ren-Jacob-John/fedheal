@@ -6,8 +6,10 @@ without HTTP or a database. Thresholds are DEMO/engineering thresholds taken
 from environment variables; they are not clinical acceptance criteria and
 must not be described as such.
 """
+import math
 import os
 import re
+import struct
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -17,7 +19,7 @@ from sqlalchemy.orm import Session
 
 import models
 from audit import audit_event
-from auth import require_module3_service_key, require_super_admin
+from auth import require_model_candidate_credential, require_promoted_model_read, require_super_admin
 from database import get_db
 
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -51,6 +53,39 @@ def assert_no_raw_data(value, path: str = "$") -> None:
             raise HTTPException(status_code=422, detail=f"{path} is too long for registry metadata")
 
 
+def canonical_hash(coef: list, intercept: list) -> str:
+    """Same canonical form as module3-fedlearning/federation_registry.artifact_hash (dtype <f8, shape, bytes),
+    in pure Python so the registry can re-derive the hash itself instead of trusting the caller's."""
+    import hashlib
+    h = hashlib.sha256()
+    h.update(str((len(coef), len(coef[0]))).encode())
+    h.update(struct.pack(f"<{len(coef[0])}d", *coef[0]))
+    h.update(str((len(intercept),)).encode())
+    h.update(struct.pack(f"<{len(intercept)}d", *intercept))
+    return h.hexdigest()
+
+
+def validate_parameters(parameters: dict, input_spec: dict) -> int:
+    """Shape/finite checks for a small linear model; returns the feature count."""
+    try:
+        coef, intercept = parameters["coef"], parameters["intercept"]
+        n = len(coef[0])
+        ok = (len(coef) == 1 and 1 <= n <= 64 and len(intercept) == 1
+              and all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+                      for v in [*coef[0], *intercept]))
+        spec_ok = (isinstance(input_spec, dict) and len(input_spec.get("feature_names", [])) == n
+                   and all(isinstance(x, str) and 0 < len(x) <= 64 for x in input_spec["feature_names"])
+                   and len(input_spec.get("center", [])) == n and len(input_spec.get("scale", [])) == n
+                   and all(isinstance(v, (int, float)) and math.isfinite(v) for v in input_spec["center"])
+                   and all(isinstance(v, (int, float)) and math.isfinite(v) and v > 0 for v in input_spec["scale"]))
+    except (KeyError, TypeError, IndexError):
+        ok = spec_ok = False
+    if not (ok and spec_ok):
+        raise HTTPException(status_code=422, detail="parameters/input_spec must describe one linear model "
+                                                    "(1 x n coefficients, 1 intercept, matching feature_names/center/scale)")
+    return n
+
+
 class Policy:
     def __init__(self):
         f = lambda k, d: float(os.environ.get(k, d))  # noqa: E731
@@ -77,9 +112,12 @@ def evaluate_candidate(candidate: dict, current: Optional[dict], policy: Policy)
     m = candidate.get("metrics") or {}
     meta = candidate.get("training_metadata") or {}
 
-    add("integrity", "PASS" if HEX64.match(candidate.get("artifact_hash") or "") else "FAIL",
-        "artifact_hash is a 64-char sha256 hex digest" if HEX64.match(candidate.get("artifact_hash") or "")
-        else "artifact_hash missing or malformed")
+    hash_ok = bool(HEX64.match(candidate.get("artifact_hash") or ""))
+    verified = candidate.get("parameters_verified") is True
+    add("integrity", "PASS" if hash_ok and verified else "FAIL",
+        "weights were supplied and the registry re-derived the artifact hash from them" if hash_ok and verified
+        else ("artifact_hash missing or malformed" if not hash_ok
+              else "no verifiable weights were supplied; there would be nothing to deploy"))
 
     hospitals = candidate.get("participating_hospitals") or []
     add("participation", "PASS" if len(set(hospitals)) >= policy.min_hospitals else "FAIL",
@@ -151,6 +189,8 @@ class CandidateIn(BaseModel):
     training_metadata: dict = Field(default_factory=dict)
     metrics: dict = Field(default_factory=dict)
     artifact_hash: str = Field(min_length=1, max_length=128)
+    parameters: Optional[dict] = None
+    input_spec: Optional[dict] = None
 
 
 class ModelVersionOut(BaseModel):
@@ -190,12 +230,18 @@ def build_router() -> APIRouter:
 
     @router.post("/admin/models/candidates", response_model=ModelVersionOut, status_code=201)
     def register_candidate(payload: CandidateIn, request: Request, db: Session = Depends(get_db),
-                           _=Depends(require_module3_service_key)):
+                           _=Depends(require_model_candidate_credential)):
         """Module 3 registers the global model a federated round produced.
         Registration deploys nothing."""
         assert_no_raw_data(payload.training_metadata, "$.training_metadata")
         assert_no_raw_data(payload.metrics, "$.metrics")
         assert_no_raw_data(payload.participating_hospitals, "$.participating_hospitals")
+        if payload.parameters is not None:
+            validate_parameters(payload.parameters, payload.input_spec or {})
+            if canonical_hash(payload.parameters["coef"], payload.parameters["intercept"]) != payload.artifact_hash:
+                audit_event("model.register", "denied", request=request, actor_service="module3",
+                            reason="artifact_hash_mismatch")
+                raise HTTPException(status_code=422, detail="artifact_hash does not match the supplied parameters")
         n = db.query(models.ModelVersion).filter_by(model_name=payload.model_name,
                                                     condition=payload.condition).count()
         cur = _current(db, payload.model_name, payload.condition)
@@ -204,7 +250,8 @@ def build_router() -> APIRouter:
             parent_version=cur.version if cur else None, training_round=payload.training_round,
             participating_hospitals=payload.participating_hospitals,
             training_metadata=payload.training_metadata, metrics=payload.metrics,
-            artifact_hash=payload.artifact_hash, validation_status="PENDING", deployment_status="CANDIDATE",
+            artifact_hash=payload.artifact_hash, parameters=payload.parameters, input_spec=payload.input_spec,
+            validation_status="PENDING", deployment_status="CANDIDATE",
         )
         db.add(row)
         db.commit()
@@ -238,7 +285,8 @@ def build_router() -> APIRouter:
         cur = _current(db, row.model_name, row.condition)
         report = evaluate_candidate(
             {"metrics": row.metrics, "training_metadata": row.training_metadata,
-             "participating_hospitals": row.participating_hospitals, "artifact_hash": row.artifact_hash},
+             "participating_hospitals": row.participating_hospitals, "artifact_hash": row.artifact_hash,
+             "parameters_verified": row.parameters is not None},
             {"metrics": cur.metrics} if cur else None, policy)
         report["compared_against"] = cur.version if cur else None
         row.validation_report = report
@@ -294,6 +342,26 @@ def build_router() -> APIRouter:
                     actor_role=admin.get("role"), resource_type="model", resource_id=prev.id,
                     model_version=prev.version)
         return prev
+
+    @router.get("/admin/models/promoted")
+    def promoted_model(request: Request, condition: str, model_name: Optional[str] = None,
+                       db: Session = Depends(get_db), _=Depends(require_promoted_model_read)):
+        """What Module 8 serves: the currently DEPLOYED (promoted) model with its weights and provenance.
+        Aggregates and weights only; nothing patient-level exists in the registry."""
+        q = db.query(models.ModelVersion).filter_by(condition=condition, deployment_status="DEPLOYED")
+        if model_name:
+            q = q.filter_by(model_name=model_name)
+        row = q.order_by(models.ModelVersion.approved_at.desc()).first()
+        if row is None or row.parameters is None:
+            raise HTTPException(status_code=404, detail="No promoted model for this condition")
+        return {"id": row.id, "model_name": row.model_name, "version": row.version,
+                "parent_version": row.parent_version, "condition": row.condition,
+                "training_round": row.training_round, "n_participating_hospitals": len(row.participating_hospitals or []),
+                "artifact_hash": row.artifact_hash, "metrics": {k: row.metrics.get(k) for k in
+                                                                ("accuracy", "n_eval", "majority_class_floor", "eval_set")},
+                "training_metadata": row.training_metadata, "validation_status": row.validation_status,
+                "deployment_status": row.deployment_status, "approved_at": row.approved_at,
+                "parameters": row.parameters, "input_spec": row.input_spec}
 
     @router.get("/admin/models/current", response_model=ModelVersionOut)
     def current_model(model_name: str, condition: str, db: Session = Depends(get_db),

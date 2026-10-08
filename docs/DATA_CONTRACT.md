@@ -122,3 +122,15 @@ model — is removed.
   is tagged `data_driven: false` and shown in the UI as a reference note, not
   as an explanation of the record. (Its old vitals text mentioned glucose and
   medication load; it never saw those values.)
+
+
+---
+
+## Addendum (2026-10): cases, history, scans, registry
+
+- **Case** (`cases`): `hospital_id` (from the session), `patient_ref` (synthetic id, `[A-Za-z0-9._-]`), `encounter_id`, `admission_reason`, `current_condition` (a Module 6 condition key; analysis never guesses it), `presenting_symptoms` (list), `status` (`OPEN|REVIEWED|NEEDS_MORE_DATA`).
+- **Medical history** (`medical_histories`, one per case): lists of short strings (≤ 50 items × 200 chars) — conditions, previous diagnoses, surgeries, allergies, medications, family history, previous admissions, symptoms — plus `notes` (≤ 2000 chars). **Not a model input.**
+- **Vitals**: unchanged schema; now linkable via `vitals_records.case_id`. **Not added** (would change the model's input dimension and Module 2's schema): temperature, SpO2, respiratory rate.
+- **Scan** (`scans`): metadata + server-side file reference; PNG/JPEG only; `status UPLOADED`; no analysis.
+- **Review** (`clinician_reviews`): decision + note; never a training label.
+- **Registry** (`model_versions`): ids, hashes, aggregate metrics, weights (≤ 64 numbers) and the input transform (feature names, centre, scale). No patient-level fields; enforced on write.

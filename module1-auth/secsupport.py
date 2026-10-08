@@ -8,6 +8,7 @@ import os
 import uuid
 
 _TEST_DB_PATH = f"./_test_sec_{uuid.uuid4().hex}.db"
+os.environ.setdefault("FEDHEAL_ALLOW_PUBLIC_REGISTRATION", "true")  # the open path is under test; closed-by-default is tested in test_cases.py
 os.environ.setdefault("FEDHEAL_DATABASE_URL", f"sqlite:///{_TEST_DB_PATH}")
 
 import database  # noqa: E402

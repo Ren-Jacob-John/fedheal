@@ -158,6 +158,44 @@ function HistoryForm({ token, caseId, onSaved }) {
   );
 }
 
+function ScanUpload({ token, caseId, onSaved }) {
+  const [file, setFile] = useState(null);
+  const [type, setType] = useState("chest_xray");
+  const [scans, setScans] = useState(null);
+  const [error, setError] = useState(null);
+  const [ok, setOk] = useState(null);
+  const load = useCallback(() => authApi.listScans(token, caseId).then(setScans).catch(() => setScans([])), [token, caseId]);
+  useEffect(() => { load(); }, [load]);
+  async function submit(e) {
+    e.preventDefault();
+    setError(null); setOk(null);
+    if (!file) { setError("Choose a PNG or JPEG file first."); return; }
+    try {
+      await authApi.uploadScan(token, caseId, type, file);
+      setOk("Scan stored and linked to this case. No image analysis is available in this release.");
+      setFile(null); load(); onSaved();
+    } catch (err) { setError(err.detail?.message || explainError(err)); }
+  }
+  return (
+    <form className="cases__form" onSubmit={submit} aria-label="Scan upload">
+      <h3>Scans</h3>
+      <div className="cases__grid">
+        <label>Type
+          <select value={type} onChange={(e) => setType(e.target.value)}>
+            {["chest_xray", "ct_slice", "retina", "skin", "histology", "other"].map((t) => <option key={t} value={t}>{t.replace("_", " ")}</option>)}
+          </select>
+        </label>
+        <label>Image (PNG or JPEG, max 5 MB)<input type="file" accept="image/png,image/jpeg" onChange={(e) => setFile(e.target.files?.[0] || null)} /></label>
+      </div>
+      <button type="submit">Upload scan</button>
+      <Msg error={error} ok={ok} />
+      {scans && scans.length > 0 && (
+        <ul>{scans.map((s) => <li key={s.scan_id}>{s.scan_type.replace("_", " ")} — {s.status} — analysis unavailable</li>)}</ul>
+      )}
+    </form>
+  );
+}
+
 function Report({ report }) {
   const contributions = report.explanation?.status === "available"
     ? Object.fromEntries(report.explanation.contributions.map((c) => [c.feature, c.contribution])) : null;
@@ -173,9 +211,20 @@ function Report({ report }) {
       <h3>Model</h3>
       <p>
         <span className={`synth-badge synth-badge--${MODEL_TONE[report.model.status] || "info"}`}>{report.model.status}</span>{" "}
-        {report.model.name} · {report.model.version}
+        {report.model.name} · {report.model.version} · {report.model.federated ? "federated" : "not federated"}
         {report.stub_or_fallback && <strong> — fallback/demo model: not a validated clinical result.</strong>}
       </p>
+      {report.model.label && <p className="cases__banner" role="note">{report.model.label}</p>}
+      {report.model.note && <p className="cases__empty">{report.model.note}</p>}
+      {report.model.provenance && (
+        <p className="cases__empty">
+          Provenance: round {report.model.provenance.training_round}, {report.model.provenance.n_participating_hospitals} hospitals,
+          weights sha256 {report.model.provenance.artifact_hash.slice(0, 12)}…. {report.model.provenance.metrics_note}
+        </p>
+      )}
+      {report.uploaded_unanalysed_modalities?.scan && (
+        <p className="synth-warning">Scan stored ({report.uploaded_unanalysed_modalities.scan.count}); {report.uploaded_unanalysed_modalities.scan.analysis}.</p>
+      )}
       <h3>Model output</h3>
       {report.findings.map((f, i) => <p key={i}>{f.label} <em>({f.note})</em></p>)}
       <p>Model score: {report.confidence != null ? report.confidence.toFixed(2) : "—"} — {report.uncertainty.note}</p>
@@ -217,6 +266,7 @@ function CaseDetail({ token, caseItem, onChanged }) {
       <h2>{caseItem.patient_ref} <small>({caseItem.status})</small></h2>
       <p>Admission: {caseItem.admission_reason} · Condition: {caseItem.current_condition || "not set"}</p>
       <VitalsForm token={token} caseId={caseItem.id} onSaved={() => setReport(null)} />
+      <ScanUpload token={token} caseId={caseItem.id} onSaved={() => setReport(null)} />
       <HistoryForm token={token} caseId={caseItem.id} onSaved={() => setReport(null)} />
       <h3>AI analysis</h3>
       <button onClick={analyze} disabled={state.busy}>{state.busy ? "Analysing…" : "Run AI analysis"}</button>

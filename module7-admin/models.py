@@ -81,6 +81,9 @@ class ModelVersion(Base):
     deployment_status = Column(String, nullable=False, default="CANDIDATE", index=True)
     replaces_id = Column(String, nullable=True)       # the model this one displaced on promotion
     artifact_hash = Column(String, nullable=False)
+    # Weights + the input transform needed to serve this model. Verified against artifact_hash at registration.
+    parameters = Column(JSON, nullable=True)
+    input_spec = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=utcnow, index=True)
     approved_at = Column(DateTime, nullable=True)
     approved_by = Column(String, nullable=True)

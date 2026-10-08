@@ -188,3 +188,24 @@ class ClinicianReview(Base):
     decision = Column(String, nullable=False)   # ACCEPTED | OVERRIDDEN | NEEDS_MORE_DATA
     note = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class Scan(Base):
+    """
+    Metadata for an uploaded image linked to a case. The file itself lives under UPLOAD_STORAGE_PATH
+    with a server-generated name; the client's filename is never used as a path.
+    status: UPLOADED = stored and linked, NO analysis exists for it (there is no validated imaging model).
+    """
+    __tablename__ = "scans"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    case_id = Column(String, ForeignKey("cases.id"), nullable=False, index=True)
+    hospital_id = Column(String, ForeignKey("hospitals.id"), nullable=False, index=True)
+    scan_type = Column(String, nullable=False)          # free label chosen from a fixed list, e.g. "chest_xray"
+    file_reference = Column(String, nullable=False)     # server-side relative path; never returned to clients
+    content_type = Column(String, nullable=False)       # sniffed from the bytes, not trusted from the client
+    size_bytes = Column(Integer, nullable=False)
+    sha256 = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="UPLOADED")
+    uploaded_by = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)

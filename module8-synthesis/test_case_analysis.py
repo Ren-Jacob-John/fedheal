@@ -121,3 +121,30 @@ def test_no_treatment_or_diagnosis_fields(bundle):
     text = str(b).lower()
     for banned in ("prescri", "dosage", "treatment plan", "definitive diagnosis"):
         assert banned not in text.replace("not a diagnosis", "")
+
+
+def test_uploaded_scan_is_reported_stored_but_never_analysed(bundle):
+    bundle["scans"] = [{"scan_id": "s1", "scan_type": "chest_xray", "status": "UPLOADED"}]
+    b = analyze().json()
+    assert b["uploaded_unanalysed_modalities"]["scan"]["analysis"].startswith("UNAVAILABLE")
+    assert "scan" in b["missing_modalities"]                      # no analysable scan evidence exists
+    assert "no validated imaging model" in b["basis_statement"] and "1 scan(s) are stored" in b["basis_statement"]
+    assert "Scan evidence was not available" not in b["basis_statement"]
+    assert not any(f.get("source") in ("imaging", "scan") for f in b["findings"])
+
+
+def test_scan_only_condition_gives_an_explicit_unavailable_response_not_findings(bundle):
+    bundle["case"]["current_condition"] = "pneumonia"
+    bundle["vitals"] = []
+    bundle["scans"] = [{"scan_id": "s1", "scan_type": "chest_xray", "status": "UPLOADED"}]
+    r = analyze()
+    d = r.json()["detail"]
+    assert r.status_code == 422 and d["status"] == "MODEL_UNAVAILABLE"
+    assert d["uploaded_unanalysed_modalities"]["scan"]["status"] == "UPLOADED" and "findings" not in d
+
+
+def test_condition_is_never_guessed(bundle):
+    bundle["case"]["current_condition"] = None
+    r = analyze()
+    assert r.status_code == 422 and r.json()["detail"]["status"] == "CONDITION_NOT_SET"
+    assert "prediction" not in r.json()["detail"] and "findings" not in r.json()["detail"]
