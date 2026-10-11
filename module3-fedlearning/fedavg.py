@@ -50,7 +50,7 @@ def run_local_only_baseline(hospital_splits, X_global_holdout, y_global_holdout)
     """
     accuracies = []
     for X_train, X_test, y_train, y_test in hospital_splits:
-        model = build_model()
+        model = build_model(X_train.shape[1])
         model.partial_fit(X_train, y_train, classes=np.array([0, 1]))
         accuracies.append(model.score(X_global_holdout, y_global_holdout))
     return float(np.mean(accuracies))

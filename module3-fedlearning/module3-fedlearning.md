@@ -18,29 +18,25 @@ learned model weights are exchanged, and a central process averages them
   layering on XGBoost/PyTorch's extra complexity.
 - `client.py` — `HospitalClient`, a `flwr.client.NumPyClient`. One
   instance = one hospital's local node. It only ever touches that
-  hospital's own `(X, y)` partition; only `fit()`'s returned weight
-  arrays travel back to the server, never the data itself.
+  hospital's own `(X, y)` partition; only weight arrays, ids, counts and
+  aggregate evaluation metrics travel to the server, never the data itself.
 - `data.py` — synthetic data generation and a **non-IID** (Dirichlet)
   partition across simulated hospitals, so the demo reflects the real
   problem (different hospitals have different patient population
   distributions) rather than an easy IID split.
-- `real_data.py` — pulls **real, validated** hospital data from Module
-  1's `/vitals/export` (service-to-service, authenticated) instead of
-  synthetic data. Documents openly that when a record has no real
-  clinical outcome label, it falls back to a **rule-based placeholder
-  label** (`_placeholder_label`) purely so the pipeline is runnable
-  end-to-end today — this is a known, intentional limitation, not a
-  hidden bug, and should be swapped for real clinical labels as soon as
-  they're available from a hospital's own records.
+- `real_data.py` — hospital-local loader uses the existing scoped Module 1
+  credential and excludes unlabeled, flagged, or incomplete records by
+  default. `load_real_partitions()` is explicitly disabled because it
+  pooled raw records centrally; `client_runner.py` is the allowed
+  hospital-local path.
 - `simulate.py` — drives the federated rounds manually, single-process,
   using the exact same `HospitalClient` class a real deployment would
   use. Deliberately avoids `flwr.simulation.start_simulation()` (which
   needs Ray) since real multiprocessing isn't needed to prove FedAvg
   works. Reports round number / hospital count / accuracy to Module 7,
   best-effort.
-- `simulate_real.py` — the same round-driving loop as `simulate.py`, but
-  against `real_data.py`'s real (validated, currently placeholder-labeled)
-  hospital data instead of synthetic data.
+- `simulate_real.py` — deprecated and refused: centralized pooling of real
+  hospital data violates the privacy boundary. Use the per-hospital runner.
 - `server.py` — the **real, networked** Flower server
   (`fl.server.start_server` + a custom `DeterministicFedAvg` strategy) —
   this is what the project graduates to once hospitals are literally
@@ -54,11 +50,12 @@ learned model weights are exchanged, and a central process averages them
   `HospitalClient` class the in-process simulations use — only the
   caller changes, from a manual Python loop to Flower's real gRPC
   transport. Resolves a hospital by `--hospital-id` or `--hospital-name`,
-  pulls that hospital's own validated data via `real_data.py`, and never
-  sends anything but model weights over the wire. TLS is explicitly out
-  of scope for now (`--insecure` defaults on, matching `server.py`'s
-  plaintext listener) — noted directly in both files' docstrings as a
-  deferred item, not an oversight.
+pulls that hospital's own validated data via `real_data.py`, and sends
+model updates plus only hospital/request ids, provenance counts, and
+aggregate evaluation metrics, never patient rows. Server-
+  authenticated TLS is supported by Flower's certificate arguments but
+  remains opt-in (`--insecure` defaults on for localhost). Client-
+  certificate mTLS is unsupported by this Flower adapter.
 
 **Why `DeterministicFedAvg` exists (worth understanding, not just
 knowing it's there):** plain Flower `FedAvg` aggregates client results in
@@ -113,8 +110,8 @@ python seed_uci_heart.py --hospitals 3
 # Synthetic-data simulation (no other services needed):
 python simulate.py
 
-# Real-data simulation (needs Module 1 running and reachable, plus its
-# service key configured):
+# Centralized real-data pooling is disabled by the privacy boundary. This
+# legacy entry point now exits with an explicit refusal:
 python simulate_real.py
 
 # Real NETWORKED path — one Flower server + one client process per
@@ -128,7 +125,7 @@ python client_runner.py --hospital-name "Rural Clinic"     --server localhost:80
 
 ### Automated checks for the real networked path
 
-- `run_local_smoke_test.sh` — spins up a throwaway Module 1 (SQLite),
+- `run_local_smoke_test.sh` — spins up a throwaway Module 1 (local document store),
   seeds N non-IID hospitals, starts `server.py`, starts N real
   `client_runner.py` processes, and asserts the run completes with every
   client's results aggregated every round (fails loudly, with logs, on
@@ -145,8 +142,8 @@ python client_runner.py --hospital-name "Rural Clinic"     --server localhost:80
   (fixed by `DeterministicFedAvg`) and the feature-scaling bug (fixed in
   `real_data.py`) — it's a plumbing check ("did the real path reproduce
   the same math as the known-good in-process path"), not a claim about
-  generalization, which remains `simulate_real.py`'s job via its
-  global-holdout comparison.
+  generalization. Public-data comparison is handled by
+  `compare_uci_heart.py`; centralized hospital-data pooling is disabled.
   ```bash
   python test_client_runner_matches_simulation.py --hospitals 3 --records-per-hospital 20
   ```
@@ -157,22 +154,36 @@ python client_runner.py --hospital-name "Rural Clinic"     --server localhost:80
 |---|---|---|---|
 | `simulate.py` | synthetic (`make_classification`) | synthetic | No |
 | `compare_uci_heart.py` | **real** (UCI Cleveland) | **real** | No |
-| `simulate_real.py` | whatever is in Module 1 | real (placeholders opt-in) | Yes |
+| `simulate_real.py` | disabled; central pooling is refused | n/a | No |
 
-`simulate.py` isn't obsolete — it's still the only way to stress-test
-FedAvg under controlled skew (alpha sweeps) that a fixed 303-record real
-dataset can't produce. `compare_uci_heart.py` is what to quote.
-`simulate_real.py` is what proves the integration works end to end.
+`simulate.py` isn't obsolete — it's the synthetic-data harness for
+controlled-skew FedAvg checks. `compare_uci_heart.py` is the offline,
+public-data comparison tool; only quote its multi-seed summary with its
+spread and win rate, not a single run as clinical performance.
 
-Both `compare_uci_heart.py` and `simulate_real.py` import their FedAvg
-aggregation and solo baseline from `fedavg.py`, so the offline number and
-the through-the-stack number are the same math, not two implementations
-that happen to agree.
+The real-services integration, including hospital-local networked clients,
+count-triggered requests, candidate registration, validation/promotion and
+inference, is exercised by
+`python -m pytest -q tests/integration/test_federation_flow.py` from the repo
+root. Each client needs a Module 1 token scoped to that hospital
+(`FEDHEAL_SVC_TOKEN_M3_M1`) and a Module 7 retraining token
+(`FEDHEAL_SVC_TOKEN_M3_M7`); tokens must never be shared across hospitals.
 
-**Key environment variables** (read via `real_data.py` / `simulate_real.py`):
-the credential for Module 1 must be a hospital-scoped token (`FEDHEAL_SVC_TOKEN_M3_M1`, hospital client)
-or the operator signing key (`FEDHEAL_SVC_SIGNING_KEY_M3_M1`, must equal
-Module 1's) — plus the URL Module 1 is reachable at.
+For count-gated scheduling, run the hospital-local client with
+`client_runner.py --watch-retraining --hospital-id <id>`. It additionally
+requires a hospital-scoped `FEDHEAL_SVC_TOKEN_M3_M7` minted by
+Module 7's `mint_retraining_runner_token.py`, and polls
+`FEDHEAL_ADMIN_API_URL` (default `http://localhost:8005`). Module 7's
+`FEDHEAL_RETRAIN_MIN_ELIGIBLE_RECORDS` threshold is disabled when unset or
+zero. The runner reports only an eligible-record count to M7 and excludes flagged
+and placeholder-labeled records in watch mode. Each fit/evaluation message
+contains only ids and counts/metrics needed to associate the round with its
+claimed requests and attest eligible inputs. On a complete final round, the
+networked server registers the aggregated weights and aggregate local-holdout
+metrics as a CANDIDATE only when all participating requests and provenance
+counts match. Otherwise it logs an explicit skip; the runner marks the
+request FAILED and the eligibility baseline is not advanced. M7 links
+candidate ids to requests. Nothing is auto-validated or promoted.
 
 ## How it depends on / is depended on by other modules
 
@@ -214,10 +225,9 @@ Module 1's) — plus the URL Module 1 is reachable at.
   implemented and verified — via `run_local_smoke_test.sh` and
   `test_client_runner_matches_simulation.py` — to reach the same result
   as the known-good in-process simulation. Not yet exercised across
-  actually-separate physical machines (everything tested so far is
-  localhost/subprocess-based) or under TLS — both explicitly deferred,
-  not overlooked (see `docs/development-plan-to-oct20.md` if present in
-  your checkout, or ask the team for its current equivalent).
+  actually-separate physical machines or under TLS. The durable retraining
+  queue-triggered candidate link flow passes in the integration test across
+  separate service processes, but not yet in separate containers.
 - Aside from the two tests above, the rest of the module (synthetic
   simulation, `client.py`, `model.py`, `data.py`) still has no dedicated
   unit tests.

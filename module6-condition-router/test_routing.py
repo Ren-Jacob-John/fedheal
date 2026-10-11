@@ -78,9 +78,9 @@ def test_finding_carries_status_card_and_marks_fallback(router):
 def test_stub_specialist_is_marked_stub_and_fallback(router):
     card = router.status_for_condition("pneumonia")[0]
     assert card["is_stub"] is True and card["is_fallback"] is True and card["training_status"] == "none"
-    f = router.route("pneumonia", {"chest_xray": {"image": None}}).findings[0]
-    assert f.prediction.is_stub is True and f.prediction.is_fallback is True
-    assert f.prediction.metadata["stands_in_for"]
+    assert card["available"] is False
+    with pytest.raises(SpecialistUnavailableError, match="unavailable"):
+        router.route("pneumonia", {"chest_xray": {"image": None}})
 
 
 def test_shap_contributions_are_labelled_with_the_models_feature_names(router):

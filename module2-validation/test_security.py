@@ -127,6 +127,26 @@ class TestValidationBehaviourUnchanged:
         assert client.get("/health").status_code == 200
 
 
+class TestOptionalVitals:
+    def test_new_vitals_optional_for_legacy_records(self):
+        assert post_json([GOOD], h(token())).status_code == 200
+
+    @pytest.mark.parametrize("field,value", [
+        ("temperature_c", 46), ("temperature_c", 24),
+        ("spo2_percent", 101), ("spo2_percent", -1),
+        ("respiratory_rate_bpm", 0), ("respiratory_rate_bpm", 101),
+    ])
+    def test_new_vitals_outside_configured_ranges_are_not_passed(self, field, value):
+        response = post_json([{**GOOD, field: value}], h(token()))
+        assert response.status_code == 200
+        assert response.json()["passed"] == 0
+        assert response.json()["flagged"] + response.json()["rejected"] == 1
+
+    def test_valid_new_vitals_pass_validation(self):
+        record = {**GOOD, "temperature_c": 37.0, "spo2_percent": 98, "respiratory_rate_bpm": 16}
+        assert post_json([record], h(token())).json()["passed"] == 1
+
+
 class TestSizeLimits:
     def test_small_json_ok(self):
         assert post_json([GOOD] * 3, h(token())).status_code == 200

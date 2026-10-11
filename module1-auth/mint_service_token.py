@@ -2,7 +2,7 @@
 Operator tool: mint a long-lived, hospital-scoped credential for Module 3.
 
     FEDHEAL_ENV=production FEDHEAL_SVC_SIGNING_KEY_M3_M1=... \
-    FEDHEAL_DATABASE_URL=... \
+    FEDHEAL_FIREBASE_PROJECT_ID=... GOOGLE_APPLICATION_CREDENTIALS=... \
     python mint_service_token.py --hospital-id <uuid> [--ttl-days 90]
 
 The printed token goes to THAT hospital's Module 3 client as
@@ -20,7 +20,7 @@ import sys
 import auth
 import models
 import service_auth
-from database import SessionLocal
+from database import repo
 
 
 def main() -> int:
@@ -32,11 +32,7 @@ def main() -> int:
         print("--ttl-days must be between 1 and 365", file=sys.stderr)
         return 2
 
-    db = SessionLocal()
-    try:
-        exists = db.query(models.Hospital.id).filter(models.Hospital.id == args.hospital_id).first()
-    finally:
-        db.close()
+    exists = repo.get_hospital(args.hospital_id)
     if not exists:
         print("No hospital with that id exists in this database.", file=sys.stderr)
         return 1

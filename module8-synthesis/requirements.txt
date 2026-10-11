@@ -15,8 +15,8 @@ python-dotenv==1.0.1
 # service's one endpoint exercises need these):
 scikit-learn==1.5.2
 xgboost==3.3.0
-numpy>=1.26
-shap==0.52.0
+numpy==1.26.4
+shap==0.46.0
 httpx==0.27.2
 lightgbm==4.7.0   # imported by module6 models/leukemia_cbc.py at import time
 pandas==2.2.3

@@ -519,7 +519,8 @@ class TestRecordReadAccess:
         resp = client.get(f"/vitals/{rid}", headers=bearer(token))
         assert resp.status_code == 200 and resp.json()["patient_ref"] == ref
         assert set(resp.json()) == {"id", "patient_ref", "age_years", "height_cm", "weight_kg", "systolic_bp",
-                                    "diastolic_bp", "heart_rate_bpm", "medication_count", "medication_mg_total",
+                                    "diastolic_bp", "heart_rate_bpm", "temperature_c", "spo2_percent",
+                                    "respiratory_rate_bpm", "medication_count", "medication_mg_total",
                                     "label", "label_source", "validation_status"}
 
     def test_get_other_hospitals_record_is_403_and_audited(self, caplog):

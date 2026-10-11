@@ -1,6 +1,7 @@
 """Registry lifecycle + validation gate. Metric values below are SYNTHETIC test
 inputs for exercising the gate logic; they are not results of any real model."""
 import hashlib
+import json
 import time
 
 import pytest
@@ -215,7 +216,12 @@ def test_malformed_parameters_are_refused():
                 {"coef": [[1.0, 2.0, 3.0]]}):
         body = cand(cond="malformed")
         body["parameters"] = bad
-        assert register(body).status_code in (422,), bad
+        response = client.post(
+            "/admin/models/candidates",
+            content=json.dumps(body),
+            headers={**svc(), "Content-Type": "application/json"},
+        )
+        assert response.status_code == 422, bad
 
 
 def test_candidate_without_weights_cannot_pass_the_gate():

@@ -46,7 +46,9 @@ from conditions import CONDITION_REGISTRY, resolve_condition  # noqa: E402
 from fusion import FusionLayer  # noqa: E402
 
 import config  # noqa: E402
+import considerations  # noqa: E402
 import feature_mapper  # noqa: E402
+import imaging_analysis  # noqa: E402
 import model_provider  # noqa: E402
 import promoted_model  # noqa: E402
 from audit import audit_event  # noqa: E402
@@ -322,6 +324,86 @@ async def fetch_case_bundle(case_id: str, token: str | None) -> dict:
     return {"case": case, "history": history, "vitals": vitals, "scans": scans}
 
 
+async def persist_case_analysis(case_id: str, token: str | None, packet: dict) -> str:
+    """Persist only model metadata, feature identifiers, and structured output in Module 1."""
+    model = packet["model"]
+    explanation = packet.get("explanation") or {}
+    reasoning = packet.get("reasoning") or {}
+    provenance = model.get("provenance") or {}
+    missing = reasoning.get("missing_inputs") or {}
+    input_drivers = reasoning.get("input_drivers") or []
+    model_inputs = {
+        feature
+        for driver in input_drivers
+        if isinstance(driver, dict) and driver.get("used_by_model")
+        for feature in driver.get("fields", [])
+        if isinstance(feature, str)
+    }
+    missing_inputs = sorted({
+        item
+        for group in missing.values()
+        if isinstance(group, list)
+        for item in group
+        if isinstance(item, str)
+    })
+    considerations_out = packet.get("suggested_considerations") or {}
+    payload = {
+        "model_version": model.get("version"),
+        "model_status": model.get("status"),
+        "artifact_hash": provenance.get("artifact_hash"),
+        "inputs_used": sorted(model_inputs),
+        "missing_inputs": missing_inputs,
+        "output": {
+            "condition_key": packet["condition"],
+            "prediction_label": str(packet["risk_assessment"]["label"]),
+            "confidence": packet.get("confidence"),
+            "requires_clinician_review": True,
+            "contributions": [
+                {"feature": item["feature"], "value": item.get("value"),
+                 "contribution": item["contribution"]}
+                for item in explanation.get("contributions", [])
+                if isinstance(item, dict) and isinstance(item.get("feature"), str)
+                and isinstance(item.get("contribution"), (int, float))
+            ],
+            "considerations": [
+                {"rule_id": item["id"], "version": item["version"],
+                 "source": item["source"], "validation_status": item["validation_status"]}
+                for item in considerations_out.get("items", [])
+                if isinstance(item, dict) and all(isinstance(item.get(key), str) for key in
+                       ("id", "version", "source", "validation_status"))
+            ],
+        },
+    }
+    if not isinstance(payload["model_version"], str) or not isinstance(payload["model_status"], str):
+        raise _error(502, "analysis_persistence_failed",
+                     "Module 8 could not persist analysis because model metadata was incomplete.")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{AUTH_API_URL}/cases/{case_id}/analyses", json=payload, headers=headers,
+            )
+    except httpx.HTTPError:
+        raise _error(502, "analysis_persistence_failed",
+                     "The analysis was produced but could not be saved to the case history.")
+    if response.status_code != 201:
+        raise _error(502, "analysis_persistence_failed",
+                     "The analysis was produced but Module 1 refused to save it.")
+    try:
+        saved = response.json()
+    except ValueError:
+        raise _error(502, "analysis_persistence_failed",
+                     "Module 1 returned an invalid analysis history response.")
+    if not isinstance(saved, dict):
+        raise _error(502, "analysis_persistence_failed",
+                     "Module 1 returned an invalid analysis history response.")
+    analysis_id = saved.get("analysis_id")
+    if not isinstance(analysis_id, str) or not analysis_id:
+        raise _error(502, "analysis_persistence_failed",
+                     "Module 1 returned an invalid analysis history reference.")
+    return analysis_id
+
+
 def _basis(available: list, missing: list, history, scans: list) -> str:
     basis = " and ".join(x.replace("_", " ") for x in available)
     parts = [f"This assessment is based on available {basis}."]
@@ -346,6 +428,20 @@ def _model_status(card: dict, info) -> str:
     if card.get("is_fallback") or card.get("training_status") == "demo_fit":
         return "FALLBACK"
     return "EXPERIMENTAL"
+
+
+def _reasoning(case: dict, history, record: dict, mapped: feature_mapper.MappedInput,
+               model_feature_names: list[str], explanation: dict,
+               missing_modalities: list[str]) -> dict:
+    """Describe provenance and use without echoing clinical free text."""
+    context = feature_mapper.map_case_context(case, history, record, model_feature_names)
+    return {
+        "input_drivers": context["input_drivers"],
+        "feature_contributions": explanation.get("contributions", []),
+        "missing_inputs": {"modalities": list(missing_modalities),
+                           "features": list(mapped.missing), **context["missing_inputs"]},
+        "unused_inputs": context["unused_inputs"],
+    }
 
 
 @app.post("/cases/{case_id}/analyze")
@@ -381,7 +477,9 @@ async def analyze_case(
                                                       "analysis": "UNAVAILABLE: no validated imaging model in this release"}}
                                            if scans else {}),
         "clinician_review_required": True,
+        "requires_clinician_review": True,
         "safety": {"banner": SAFETY_BANNER, "footer": SAFETY_FOOTER},
+        "suggested_considerations": considerations.considerations_for(""),
     }
 
     condition_name = case.get("current_condition")
@@ -396,6 +494,7 @@ async def analyze_case(
         audit_event("analysis.run", "denied", request=request, reason="unknown_condition", **actor)
         raise _error(404, "unknown_condition", router._unknown_message(condition_name),
                      known_conditions=sorted({s.canonical_name for s in CONDITION_REGISTRY.values()}), **base)
+    base["suggested_considerations"] = considerations.considerations_for(spec.canonical_name)
     if not set(spec.specialist_ids) <= RECORD_SPECIALISTS:
         audit_event("analysis.run", "denied", request=request, reason="unsupported_input", **actor)
         raise _error(422, "MODEL_UNAVAILABLE",
@@ -437,20 +536,43 @@ async def analyze_case(
         raise _error(503, "MODEL_UNAVAILABLE", f"The promoted model failed its integrity check ({e}). No prediction was made.", **base)
 
     if promoted is not None:
+        try:
+            model_features = list(promoted.feature_names)
+            if model_features != [item["feature"] for item in mapped.inputs]:
+                mapped = feature_mapper.map_record(record, model_features)
+        except feature_mapper.MappingDriftError as e:
+            audit_event("analysis.run", "denied", request=request, reason="promoted_schema_unsupported", **actor)
+            raise _error(503, "MODEL_UNAVAILABLE", f"The promoted model uses an unsupported feature schema: {e}.", **base)
+        if mapped.missing or mapped.invalid:
+            audit_event("analysis.run", "denied", request=request, reason="promoted_input_missing", **actor)
+            raise _error(422, "INSUFFICIENT_DATA",
+                         "The promoted model's versioned feature schema requires inputs that are not present; "
+                         "nothing was imputed.",
+                         missing_features=mapped.missing, invalid_features=mapped.invalid, **base)
         by_name = {i["feature"]: i["value"] for i in mapped.inputs}
         if set(promoted.feature_names) - set(by_name):
             audit_event("analysis.run", "denied", request=request, reason="promoted_input_mismatch", **actor)
             raise _error(503, "MODEL_UNAVAILABLE", "The promoted model needs inputs this service cannot supply.",
                          required=list(promoted.feature_names), **base)
         out = promoted.predict(by_name)
-        audit_event("analysis.run", "success", request=request, model_version=promoted.version, **actor)
         dq = []
         if len(passed) < len(vitals_rows):
             dq.append({"code": "flagged_vitals_ignored", "message": "Some vitals on this case are flagged and awaiting review; only validated vitals were used."})
         if len(passed) > 1:
             dq.append({"code": "latest_vitals_used", "message": "Several validated vitals exist; the most recent was used."})
         statement = _basis(available, missing, history, scans)
-        return {
+        explanation = {
+            "status": "available", "method": "linear_contributions",
+            "contributions": [{"feature": c["feature"], "value": c["value"], "contribution": c["contribution"]}
+                              for c in out["contributions"]],
+            "base_value": out["intercept"],
+            "what_was_used": "Per-feature contribution to the model's log-odds (coefficient x normalised value) "
+                             "for this linear model; exact for it, not SHAP and not a causal explanation.",
+            "reliability": "Explains this model's arithmetic only. It says nothing about causation and is only as "
+                           "meaningful as the model itself.",
+        }
+        base["reasoning"] = _reasoning(case, history, record, mapped, model_features, explanation, missing)
+        packet = {
             **base, "status": "ok", "condition": spec.canonical_name, "basis_statement": statement,
             "findings": [{"kind": "model_output", "label": f"model output: class {out['label']}", "source": "promoted_federated_model",
                           "note": "Class 1 is the positive outcome label recorded by the contributing hospitals. A model output for clinician review, not a diagnosis."}],
@@ -463,14 +585,7 @@ async def analyze_case(
                          for c in out["contributions"]]
                         + ([{"source": "medical_history", "used_by_model": False,
                              "note": "Recorded for clinician context; not a model input."}] if history else []),
-            "explanation": {"status": "available", "method": "linear_contributions",
-                            "contributions": [{"feature": c["feature"], "value": c["value"], "contribution": c["contribution"]}
-                                              for c in out["contributions"]],
-                            "base_value": out["intercept"],
-                            "what_was_used": "Per-feature contribution to the model's log-odds (coefficient x normalised value) "
-                                             "for this linear model; exact for it, not SHAP and not a causal explanation.",
-                            "reliability": "Explains this model's arithmetic only. It says nothing about causation and is only as "
-                                           "meaningful as the model itself."},
+            "explanation": explanation,
             "model": {"name": promoted.name, "version": promoted.version, "status": "DEPLOYED", "federated": True,
                       "training_status": "federated", "source": {"source": "promoted_federated_model", "federated": True,
                                                                   "hospital_trained": True},
@@ -480,6 +595,10 @@ async def analyze_case(
             "data_quality_warnings": dq, "warnings": [], "urgent_review_flags": [],
             "non_clinical": True, "stub_or_fallback": False,
         }
+        packet["analysis_id"] = await persist_case_analysis(case_id, token, packet)
+        audit_event("analysis.run", "success", request=request, model_version=promoted.version,
+                    analysis_id=packet["analysis_id"], **actor)
+        return packet
 
     # ---- 2. No promoted model: only the explicitly-enabled demo fallback may answer ----
     def run():
@@ -501,6 +620,8 @@ async def analyze_case(
     card, pred = finding.status, finding.prediction
     model_status = _model_status(card, VITALS_MODEL_INFO)
     explanation = _explanation(finding, mapped, report.unresolved_explainers)
+    base["reasoning"] = _reasoning(case, history, record, mapped,
+                                   [item["feature"] for item in mapped.inputs], explanation, missing)
     warnings = _warnings(card, pred)
 
     dq = []
@@ -512,9 +633,7 @@ async def analyze_case(
 
     statement = _basis(available, missing, history, scans)
 
-    audit_event("analysis.run", "success", request=request, model_version=card.get("model_version"), **actor)
-
-    return {
+    packet = {
         **base,
         "status": "ok",
         "condition": spec.canonical_name,
@@ -543,6 +662,38 @@ async def analyze_case(
         "urgent_review_flags": [],   # no clinical rule engine exists; none are invented
         "stub_or_fallback": model_status in ("STUB", "FALLBACK", "UNAVAILABLE"),
     }
+    packet["analysis_id"] = await persist_case_analysis(case_id, token, packet)
+    audit_event("analysis.run", "success", request=request, model_version=card.get("model_version"),
+                analysis_id=packet["analysis_id"], **actor)
+    return packet
+
+
+@app.post("/cases/{case_id}/scans/{scan_id}/analyze")
+async def analyze_scan(
+    case_id: str,
+    scan_id: str,
+    request: Request,
+    user: dict = Depends(require_authenticated_user),
+    token: str | None = Depends(get_raw_token),
+):
+    # Module 1 enforces case tenancy here and returns metadata only; the image
+    # file and all clinical content remain in the hospital's storage.
+    scans = await _m1_get(f"/cases/{case_id}/scans", token)
+    if not any(scan.get("scan_id") == scan_id for scan in scans):
+        raise _error(404, "scan_not_found", "Scan not found for this case.")
+
+    result = imaging_analysis.analysis_unavailable(scan_id)
+    audit_event(
+        "imaging.analysis",
+        "unavailable",
+        request=request,
+        actor_user_id=user.get("sub"),
+        actor_role=user.get("role"),
+        hospital_id=user.get("hospital_id"),
+        case_id=case_id,
+        scan_id=scan_id,
+    )
+    return result
 
 
 @app.post("/synthesize/heart_disease", status_code=410)

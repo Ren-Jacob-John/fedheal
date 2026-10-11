@@ -36,7 +36,7 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE1_DIR="$SCRIPT_DIR/../module1-auth"
 WORKDIR="$(mktemp -d)"
-DB_PATH="$WORKDIR/smoketest_auth.db"
+DB_PATH="$WORKDIR/smoketest_auth_store.json"
 
 PIDS=()
 FAILED=0
@@ -55,10 +55,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "=== 1/5: starting Module 1 (throwaway SQLite at $DB_PATH) ==="
+echo "=== 1/5: starting Module 1 (throwaway local document store at $DB_PATH) ==="
 (
   cd "$MODULE1_DIR" || exit 1
-  export FEDHEAL_DATABASE_URL="sqlite:///$DB_PATH"
+  export FEDHEAL_DB_BACKEND=local FEDHEAL_LOCAL_STORE_PATH="$DB_PATH"
   export FEDHEAL_SVC_SIGNING_KEY_M3_M1="$SVC_KEY"
   exec uvicorn main:app --host 0.0.0.0 --port "$AUTH_PORT"
 ) > "$WORKDIR/module1.log" 2>&1 &
@@ -79,33 +79,28 @@ echo ""
 echo "=== 2/5: seeding $N_HOSPITALS hospitals x $RECORDS_PER_HOSPITAL validated vitals each (non-IID) ==="
 HOSPITAL_IDS=$(
   cd "$MODULE1_DIR" && \
-  FEDHEAL_DATABASE_URL="sqlite:///$DB_PATH" python3 - "$N_HOSPITALS" "$RECORDS_PER_HOSPITAL" <<'PYEOF'
+  FEDHEAL_DB_BACKEND=local FEDHEAL_LOCAL_STORE_PATH="$DB_PATH" python3 - "$N_HOSPITALS" "$RECORDS_PER_HOSPITAL" <<'PYEOF'
 import random
 import sys
-from database import SessionLocal, engine, Base
+from database import repo
 import models
-
-Base.metadata.create_all(bind=engine)
 
 n_hospitals = int(sys.argv[1])
 n_records = int(sys.argv[2])
 
-db = SessionLocal()
 random.seed(42)
 ids = []
 for h in range(n_hospitals):
-    hospital = models.Hospital(name=f"Smoke Test Hospital {h}")
-    db.add(hospital)
-    db.commit()
-    db.refresh(hospital)
+    hospital = repo.create_hospital(models.Hospital(name=f"Smoke Test Hospital {h}"))
     ids.append(hospital.id)
+    rows = []
 
     # Same non-IID shape as the manual test: each hospital's BP distribution
     # is shifted, so hospitals genuinely don't look like each other.
     bp_shift = h * 8
     for i in range(n_records):
         systolic = random.gauss(120 + bp_shift, 15)
-        db.add(models.VitalsRecord(
+        rows.append(models.VitalsRecord(
             hospital_id=hospital.id,
             patient_ref=f"P-{h}-{i:04d}",
             age_years=random.uniform(20, 85),
@@ -119,8 +114,7 @@ for h in range(n_hospitals):
             label=int(systolic >= 140),
             validation_status="passed",
         ))
-db.commit()
-db.close()
+    repo.add_vitals_bulk(rows)
 print(",".join(ids))
 PYEOF
 )

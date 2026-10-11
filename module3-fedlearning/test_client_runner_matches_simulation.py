@@ -74,28 +74,23 @@ from server import weighted_average
 SEED_HOSPITALS_SCRIPT = """
 import random
 import sys
-from database import SessionLocal, engine, Base
+from database import repo
 import models
-
-Base.metadata.create_all(bind=engine)
 
 n_hospitals = int(sys.argv[1])
 n_records = int(sys.argv[2])
 
-db = SessionLocal()
 random.seed(42)
 ids = []
 for h in range(n_hospitals):
-    hospital = models.Hospital(name=f"Selftest Hospital {h}")
-    db.add(hospital)
-    db.commit()
-    db.refresh(hospital)
+    hospital = repo.create_hospital(models.Hospital(name=f"Selftest Hospital {h}"))
     ids.append(hospital.id)
+    rows = []
 
     bp_shift = h * 8
     for i in range(n_records):
         systolic = random.gauss(120 + bp_shift, 15)
-        db.add(models.VitalsRecord(
+        rows.append(models.VitalsRecord(
             hospital_id=hospital.id,
             patient_ref=f"P-{h}-{i:04d}",
             age_years=random.uniform(20, 85),
@@ -113,8 +108,7 @@ for h in range(n_hospitals):
             label_source="hospital",
             validation_status="passed",
         ))
-db.commit()
-db.close()
+    repo.add_vitals_bulk(rows)
 print(",".join(ids))
 """
 
@@ -242,11 +236,12 @@ def main():
 
     with tempfile.TemporaryDirectory() as workdir_str:
         workdir = Path(workdir_str)
-        db_path = workdir / "selftest_auth.db"
+        db_path = workdir / "selftest_auth_store.json"
 
-        print(f"=== starting Module 1 (throwaway SQLite at {db_path}) ===")
+        print(f"=== starting Module 1 (throwaway local document store at {db_path}) ===")
         auth_env = os.environ.copy()
-        auth_env["FEDHEAL_DATABASE_URL"] = f"sqlite:///{db_path}"
+        auth_env["FEDHEAL_DB_BACKEND"] = "local"
+        auth_env["FEDHEAL_LOCAL_STORE_PATH"] = str(db_path)
         auth_env["FEDHEAL_SVC_SIGNING_KEY_M3_M1"] = SVC_KEY
         auth_log = open(workdir / "module1.log", "w")
         auth_proc = subprocess.Popen(

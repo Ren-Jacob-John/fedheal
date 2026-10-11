@@ -18,9 +18,15 @@ records are stored against that hospital.
 **Files:**
 - `main.py` — the FastAPI app: all HTTP endpoints.
 - `auth.py` — password hashing (bcrypt) and JWT encode/decode helpers.
-- `models.py` — SQLAlchemy ORM models (Hospital, User, StoredVitalsRecord).
-- `database.py` — engine/session setup; defaults to SQLite for local dev,
-  reads `FEDHEAL_DATABASE_URL` for Postgres/Supabase in staging/prod.
+- `models.py` — the stored entities as dataclasses (Hospital, User, VitalsRecord,
+  Case, MedicalHistory, AIAnalysis, ClinicianReview, Scan), each mapped to one Firestore collection.
+- `repo.py` — every read/write the service does (endpoints no longer build queries);
+  keeps uniqueness (e-mail, hospital name) with atomic index documents.
+- `docstore.py` — the storage interface and its two backends: Firestore, and a local
+  JSON-file/in-memory store for development and tests. Shared verbatim with Module 7.
+- `database.py` — picks the backend from `FEDHEAL_DB_BACKEND` (see below).
+- `migrate_from_sql.py` — one-off copy of an old Supabase/Postgres (or SQLite) database
+  into Firestore.
 - `docs_theme.py` — cosmetic: a custom `/docs` (Swagger UI) theme, not
   functional logic.
 - `.env.example` — every environment variable this service reads.
@@ -66,65 +72,54 @@ records are stored against that hospital.
 a Module 3 service token, which sees only its own hospital) — it is no
 longer an anonymous directory.
 
+**Case analysis history:** clinicians can `POST /cases/{case_id}/analyses` to
+append structured model metadata, feature identifiers/contributions, and
+reviewable-rule references; `GET /cases/{case_id}/analyses` lists the
+hospital-scoped history. Both routes derive hospital and actor identity from
+the existing JWT and refuse access to another hospital's case. Free-text
+clinical inputs and notes are not part of the analysis schema. Analyses have
+no update/delete operation. `POST /cases/{case_id}/review` accepts an optional
+`analysis_id` and links it only after verifying that the analysis belongs to
+the same case and hospital. Review decisions remain excluded from training
+labels.
+
 ## How to run it
 
 ```bash
 cd module1-auth
 pip install -r requirements.txt
-cp .env.example .env        # then fill in real values, or leave DB URL
-                             # unset to fall back to local SQLite
+cp .env.example .env        # then fill in real values; in development the
+                             # data lives in ./fedheal_auth_store.json
 uvicorn main:app --reload --port 8001
 ```
 
 Interactive API docs: `http://localhost:8001/docs`
 
-### Database schema — Alembic (Sprint A set up, Sprint B finished)
+### Database — Firebase Firestore
 
-Schema changes moved from `Base.metadata.create_all()` to Alembic
-migrations. Sprint A set this up transitionally (both mechanisms live,
-gated by `FEDHEAL_AUTO_CREATE_TABLES`); **Sprint B removes `create_all`
-and that variable entirely** — `alembic upgrade head` is now the only way
-tables come into existence, in every environment, local dev included.
+There is no schema and there are no migrations: collections (`hospitals`, `users`,
+`vitals_records`, `cases`, `medical_histories`, `ai_analyses`, `clinician_reviews`, `scans`, plus the
+small `user_emails` / `hospital_names` uniqueness indexes) appear on first write.
+Per Firebase project, once, deploy the rules and the composite indexes:
 
 ```bash
-# FRESH database (nothing there yet):
-alembic upgrade head
-
-# EXISTING database that create_all already built (every local SQLite
-# file and the pre-Sprint-B Supabase project): tell Alembic it's already at
-# the baseline, THEN apply the new migrations.
-alembic stamp 0001_baseline
-alembic upgrade head
-
-# Review the SQL before it touches staging/prod:
-alembic upgrade head --sql
-
-# After changing models.py:
-alembic revision --autogenerate -m "what changed"
+firebase deploy --only firestore:rules,firestore:indexes     # firestore.rules, firestore.indexes.json at the repo root
 ```
 
-Alembic reads `FEDHEAL_DATABASE_URL` — the same env var `database.py`
-reads — so `alembic upgrade head` can never migrate a different database
-than the app is about to write to. `alembic.ini` deliberately leaves
-`sqlalchemy.url` empty; the Supabase password does not belong in version
-control.
+Backend selection (`FEDHEAL_DB_BACKEND`): `firestore` (default in staging/production;
+needs `FEDHEAL_FIREBASE_PROJECT_ID` and Google credentials — `GOOGLE_APPLICATION_CREDENTIALS`
+or an attached service account), `local` (default in development: a JSON file at
+`FEDHEAL_LOCAL_STORE_PATH`, default `./fedheal_auth_store.json`) or `memory` (tests).
+`local`/`memory` are refused outside development/test, and `FIRESTORE_EMULATOR_HOST`
+(the Firebase emulator) is refused in production. Tenant isolation is still enforced in
+application code by `hospital_id` from the JWT; `firestore.rules` denies all direct client access.
 
-**Check before you stamp.** Stamping a database that does NOT have the
-tables leaves Alembic believing they exist, and the baseline migration
-will then be skipped forever. `sqlite3 fedmed_auth.db ".tables"` or `\dt`
-in psql first.
-
-**Every environment now needs its migrations applied before `uvicorn
-main:app` is started against it** — there is no more `create_all` safety
-net. Staging: `alembic stamp 0001_baseline && alembic upgrade head`
-against the staging `FEDHEAL_DATABASE_URL` (staging was built by
-`create_all` too, same as every local SQLite file) — see the Sprint B
-deployment checklist in `docs/DEVELOPMENT_PLAN.md` section 7.
+Existing Supabase data: see `migrate_from_sql.py` and `docs/FIRESTORE_MIGRATION.md`.
 
 **Required environment variables** (see `.env.example` for the full,
 commented list):
-- `FEDHEAL_DATABASE_URL` — Postgres/Supabase connection string; omit for
-  SQLite fallback.
+- `FEDHEAL_DB_BACKEND` / `FEDHEAL_FIREBASE_PROJECT_ID` — see "Database" above (nothing
+  needed in development).
 - `FEDMED_JWT_SECRET` — **must be identical** across every FedHeal service
   that verifies this token (Modules 1 and 7).
 - `FEDHEAL_ENV` — `development` locally. **Unset means production**: the app
@@ -196,8 +191,8 @@ on 500 unlabeled records used to report `ready_for_training`.
   `module3-fedlearning/seed_uci_heart.py` is an end-to-end exercise of
   the upload -> validate -> store path (dedicated unit tests are Sprint C).
 - ~~`create_all` and Alembic both live during this transitional sprint~~ —
-  **resolved in Sprint B**: `create_all` and `FEDHEAL_AUTO_CREATE_TABLES`
-  are gone, `alembic upgrade head` is the only schema path now.
+  **superseded**: the SQL layer (and Alembic with it) was replaced by Firestore; there is
+  no schema step any more, only the indexes in `firestore.indexes.json`.
 - ~~No `/health` endpoint~~ — **resolved in Sprint B**: added, same shape
   as Modules 2 and 7.
 - Cross-machine verification of the real networked FL path

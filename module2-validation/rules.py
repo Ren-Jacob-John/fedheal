@@ -29,6 +29,9 @@ PLAUSIBLE_RANGES = {
     "systolic_bp": (40, 300),
     "diastolic_bp": (20, 200),
     "heart_rate_bpm": (20, 250),
+    "temperature_c": (25, 45),
+    "spo2_percent": (0, 100),
+    "respiratory_rate_bpm": (0, 100),
 }
 
 

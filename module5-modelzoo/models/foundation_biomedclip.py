@@ -111,6 +111,8 @@ class _BiomedCLIPClassifierBase(SpecialistModel):
     """
 
     task = "classification"
+    model_version = "untrained"
+    training_status = "untrained"
 
     def __init__(self, class_names: list[str]):
         if not OPEN_CLIP_AVAILABLE:
@@ -134,7 +136,7 @@ class _BiomedCLIPClassifierBase(SpecialistModel):
         self.head.eval()
 
     def is_available(self) -> bool:
-        return OPEN_CLIP_AVAILABLE
+        return False
 
     def embed(self, image: "torch.Tensor") -> "torch.Tensor":
         """
@@ -150,23 +152,7 @@ class _BiomedCLIPClassifierBase(SpecialistModel):
         return torch.cat(embeddings, dim=0)                 # (5, embed_dim)
 
     def predict(self, case: dict) -> PredictionResult:
-        image = case["image"]
-        crop_embeddings = self.embed(image)
-        with torch.no_grad():
-            logits = self.head(crop_embeddings)
-            probs = torch.softmax(logits, dim=1)[0]
-            pred_idx = int(torch.argmax(probs).item())
-
-        return PredictionResult(
-            model_name=self.name,
-            modality=self.modality,
-            task=self.task,
-            label=self.class_names[pred_idx],
-            confidence=float(probs[pred_idx].item()),
-            raw_output=probs.tolist(),
-            explanation=None,  # see class docstring — attention-viz, not Grad-CAM, is the fit here
-            metadata={"backbone": "BiomedCLIP (frozen)", "head": "cnn_vit_hybrid_v1"},
-        )
+        raise RuntimeError("analysis unavailable: no validated imaging model")
 
 
 class BiomedCLIPChestXrayModel(_BiomedCLIPClassifierBase):

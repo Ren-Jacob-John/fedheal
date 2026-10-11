@@ -11,7 +11,7 @@ component. Statuses use the registry vocabulary; the UI shows the status next to
 | Input | 8 vitals features (Module 1 schema). With the public UCI data only **age, systolic BP and heart rate** carry real values; the other 5 are fixed constants, so the model can only learn from those 3. |
 | Output | A class (1 = positive outcome label as recorded by the contributing hospitals) and a raw model score. The score is **not calibrated** and is not a probability of disease. |
 | Dataset | Public UCI Heart Disease (Cleveland), 303 records, vendored with a sha256 integrity check (`module3-fedlearning/uci_heart.py`), split across 2 seeded hospitals and uploaded through Modules 1 and 2. |
-| **Served model** | **The currently PROMOTED model from the Module 7 registry** (`vitals-fedavg-logreg`, SGD logistic regression, FedAvg). Module 8 reads it at analysis time (≤ 5 s cache), re-hashes the weights, and shows its version, federated=true, artifact hash, round, hospital count and gate metrics in every report. Status shown: `DEPLOYED` = passed the platform's engineering gate and was promoted by a super_admin; **not clinically validated** (stated in the report). |
+| **Serving contract** | When a model is PROMOTED in the Module 7 registry, Module 8 reads it at analysis time (≤ 5 s cache), re-hashes the weights, and shows its version, federated=true, artifact hash, round, hospital count and gate metrics in every report. `DEPLOYED` means only that it passed the platform's engineering gate and was explicitly promoted by a super_admin; it is **not clinically validated**. This document does not assert that a model is currently deployed in every runtime. |
 | Fallback | If, and only if, `FEDHEAL_ALLOW_DEMO_MODEL=true` (explicit in every environment, no implicit dev default) and nothing is promoted, Module 8 uses a model fitted at start-up on the same public data. Reports label it **NON-CLINICAL DEMO MODEL**, `status FALLBACK`, `federated false`. If the registry is unreachable the fallback is not used silently: without the flag the answer is `MODEL_UNAVAILABLE`. |
 | Nothing promoted, flag off | `MODEL_UNAVAILABLE` (HTTP 503). No prediction. |
 | Explanation | Promoted linear model: per-feature contribution to the log-odds (coefficient × normalised value), exact for that model, labelled `linear_contributions` (not SHAP, not causal). Fallback model: SHAP. |
@@ -28,9 +28,22 @@ component. Statuses use the registry vocabulary; the UI shows the status next to
 | Validation gate, default policy | **FAIL** (accuracy 0.591 < 0.60 minimum; n_eval 44 < 50; not ≥ 0.05 above the majority floor; between-hospital gap 0.348 > 0.25) |
 | Validation gate, relaxed TEST policy (`tests/integration/test_federation_flow.py` only) | PASS → promoted → served by Module 8 with demo fallback disabled. This proves the wiring, not that the model is good. |
 
-These numbers come from a real run of `tests/integration/test_federation_flow.py` (the same numbers on repeated runs: fixed seed). They mean the
-pipeline works and the gate does its job; they do **not** mean the model is useful. n = 44 is small
-and the result will move with a different split. Do not quote them as clinical performance.
+These numbers are a historical recorded run from 2026-10-06, not the output
+of the current one-round, queue-triggered `tests/integration/test_federation_flow.py`.
+That integration now uses separate hospital-local clients and synthetic-only
+threshold records to exercise queue provenance; it verifies lifecycle wiring,
+not these metrics. The historical results are not clinical performance and
+must not be presented as evidence that the model is useful.
+
+Networked Flower final-round candidate registration is implemented behind
+complete provenance checks: unique hospital/request ids, claimed requests,
+and counts attesting that all training examples were eligible and labeled.
+Missing or inconsistent provenance skips registration, and the request is
+not marked complete. The queue-triggered networked Flower flow passed in
+`tests/integration/test_federation_flow.py` across separate service processes
+with throwaway local stores; Docker-container execution remains unverified.
+Successful registration creates a CANDIDATE only; it does not validate or
+promote it. Queue completion is not evidence of validation or deployment.
 
 ## Other specialists (Module 5/6)
 
@@ -39,6 +52,23 @@ leukemia/genomic models are **STUB** or **UNAVAILABLE** in this release (they ne
 validation data that this repository does not contain). Conditions that need them return
 `MODEL_UNAVAILABLE`. Uploaded scans are stored and linked to the case and reported as
 `UPLOADED — analysis UNAVAILABLE`; no image finding is ever generated.
+The hospital-scoped `POST /cases/{case_id}/scans/{scan_id}/analyze` endpoint
+returns this unavailable status contract with null finding, confidence,
+heatmap reference, and model version; no scan bytes are sent to a specialist.
+
+## Versioned vitals inputs
+
+Module 1 and Module 2 support nullable `temperature_c`, `spo2_percent`, and
+`respiratory_rate_bpm`; missing values remain null. The existing model feature
+contract is version `v1` (8 fields), and promoted inference reads its ordered
+feature names and normalization arrays from the registry artifact's `input_spec`.
+Module 8 also knows the explicit `v2` field list, but does not infer or fill
+missing values. Module 3 refuses to train `v2`: no source-backed normalization
+metadata or validated training cohort/model artifact for these extra values is
+present. Existing v1 promoted artifacts remain supported. History, symptoms,
+admission reason, and condition are still context/specialist-selection data,
+not model features; there is no supported labeled encoding or trained model for
+them.
 
 ## Gate thresholds are engineering defaults
 

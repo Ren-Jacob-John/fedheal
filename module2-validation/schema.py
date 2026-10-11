@@ -19,6 +19,9 @@ class VitalsRecord(BaseModel):
     systolic_bp: Optional[float] = None
     diastolic_bp: Optional[float] = None
     heart_rate_bpm: Optional[float] = None
+    temperature_c: Optional[float] = Field(None, ge=25, le=45)
+    spo2_percent: Optional[float] = Field(None, ge=0, le=100)
+    respiratory_rate_bpm: Optional[float] = Field(None, gt=0, le=100)
     medication_count: int = Field(0, ge=0)
     medication_mg_total: float = Field(0, ge=0)  # combined daily dose, mg
 

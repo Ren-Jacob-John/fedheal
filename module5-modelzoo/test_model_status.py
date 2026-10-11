@@ -51,9 +51,11 @@ def test_predict_refuses_missing_or_wrong_width_input():
 
 def test_stub_is_never_presented_as_real():
     s = StubSpecialistModel("cxr", "chest_xray", "classification", ["normal", "pneumonia"], "densenet")
-    assert (s.is_stub, s.is_fallback, s.training_status) == (True, True, "none")
+    assert (s.is_stub, s.is_fallback, s.training_status, s.is_available()) == (True, True, "none", False)
     r = s.predict({})
     assert r.is_stub and r.is_fallback and r.training_status == "none"
+    assert r.label == "analysis unavailable: no validated model"
+    assert r.confidence == 0.0
 
 
 def test_registry_status_exposes_stub_fallback_and_training_status():
@@ -62,4 +64,6 @@ def test_registry_status_exposes_stub_fallback_and_training_status():
         assert {"is_stub", "is_fallback", "training_status", "model_version", "available"} <= set(row)
         if row["model_name"].startswith("stub-"):
             assert row["is_stub"] is True and row["real"] is False
+    image_rows = [row for row in rows if row["modality"] in {"chest_xray", "retina", "skin", "ct_scan"}]
+    assert image_rows and all(row["available"] is False for row in image_rows)
     assert any(r["modality"] == "vitals" and r["is_stub"] is False for r in rows)

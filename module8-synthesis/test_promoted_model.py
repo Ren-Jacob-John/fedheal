@@ -46,6 +46,9 @@ def case_bundle(monkeypatch):
     async def fake(case_id, token):
         return {"case": dict(CASE), "history": {"conditions": []}, "vitals": [dict(VITALS)]}
     monkeypatch.setattr(main, "fetch_case_bundle", fake)
+    async def fake_persist(case_id, token, packet):
+        return "analysis-test-id"
+    monkeypatch.setattr(main, "persist_case_analysis", fake_persist)
     pm.clear_cache()
     yield
     pm.clear_cache()

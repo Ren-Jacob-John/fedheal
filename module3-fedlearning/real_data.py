@@ -120,10 +120,38 @@ def _directory_headers() -> dict:
             hospital_id=service_auth.ANY_HOSPITAL, ttl_seconds=300,
         )
     return {"X-Service-Key": token}
-FEATURE_KEYS = [
+FEATURE_KEYS_V1 = (
     "age_years", "systolic_bp", "diastolic_bp", "heart_rate_bpm",
     "weight_kg", "height_cm", "medication_count", "medication_mg_total",
-]
+)
+FEATURE_KEYS_V2 = FEATURE_KEYS_V1 + (
+    "temperature_c", "spo2_percent", "respiratory_rate_bpm",
+)
+FEATURE_SCHEMAS = {"v1": FEATURE_KEYS_V1, "v2": FEATURE_KEYS_V2}
+FEATURE_SCHEMA_VERSION = os.environ.get("FEDHEAL_VITALS_FEATURE_SCHEMA", "v1")
+_FEATURE_MEAN_BY_VERSION = {
+    "v1": np.array([50.0, 120.0, 80.0, 75.0, 75.0, 170.0, 2.0, 150.0]),
+}
+_FEATURE_STD_BY_VERSION = {
+    "v1": np.array([20.0, 20.0, 10.0, 12.0, 18.0, 12.0, 2.0, 120.0]),
+}
+
+
+def feature_transform(version: str) -> tuple[np.ndarray, np.ndarray]:
+    """Return only source-controlled transforms carried by this model schema."""
+    if version not in FEATURE_SCHEMAS:
+        raise ValueError(f"Unsupported vitals feature schema: {version!r}")
+    if version not in _FEATURE_MEAN_BY_VERSION:
+        raise ValueError(
+            f"Training schema {version!r} is unavailable: it has no traceable, "
+            "versioned normalization transform. Preserve the existing v1 model "
+            "until a transform is sourced and validated."
+        )
+    return _FEATURE_MEAN_BY_VERSION[version], _FEATURE_STD_BY_VERSION[version]
+
+
+_FEATURE_MEAN, _FEATURE_STD = feature_transform(FEATURE_SCHEMA_VERSION)
+FEATURE_KEYS = list(FEATURE_SCHEMAS[FEATURE_SCHEMA_VERSION])
 N_FEATURES = len(FEATURE_KEYS)
 
 # Fixed normalization constants — deliberately NOT fit from any hospital's
@@ -149,10 +177,6 @@ N_FEATURES = len(FEATURE_KEYS)
 # network — but it does mean every real-data FL path was numerically
 # unstable (wildly different round-to-round accuracy, hypersensitive to
 # floating-point summation order) until this fix.
-_FEATURE_MEAN = np.array([50.0, 120.0, 80.0, 75.0, 75.0, 170.0, 2.0, 150.0])
-_FEATURE_STD = np.array([20.0, 20.0, 10.0, 12.0, 18.0, 12.0, 2.0, 120.0])
-
-
 class UnlabeledDataError(ValueError):
     """
     Raised when a hospital's export contains records with no real outcome
@@ -250,8 +274,27 @@ def _labels_for(records: list[dict], hospital: str,
 
 
 def _record_to_features(record: dict) -> np.ndarray:
-    raw = np.array([float(record.get(k) or 0.0) for k in FEATURE_KEYS])
+    missing = [key for key in FEATURE_KEYS if record.get(key) is None]
+    if missing:
+        raise ValueError(
+            f"record is missing required features for schema {FEATURE_SCHEMA_VERSION}: {missing}"
+        )
+    raw = np.array([float(record[k]) for k in FEATURE_KEYS], dtype=float)
+    if not np.isfinite(raw).all():
+        raise ValueError(f"record has non-finite values for schema {FEATURE_SCHEMA_VERSION}")
     return (raw - _FEATURE_MEAN) / _FEATURE_STD
+
+
+def _eligible_records(records: list[dict]) -> tuple[list[dict], int]:
+    """Keep only complete records for this model version; never impute."""
+    eligible = []
+    for record in records:
+        try:
+            _record_to_features(record)
+        except (TypeError, ValueError):
+            continue
+        eligible.append(record)
+    return eligible, len(records) - len(eligible)
 
 
 def list_active_hospitals() -> list[dict]:
@@ -326,6 +369,10 @@ def load_single_hospital_partition(
         include_flagged=include_flagged,
         labeled_only=not allow_placeholder_labels,
     )
+    records, missing_feature_count = _eligible_records(records)
+    if missing_feature_count:
+        logger.info("%s record(s) excluded for missing or invalid schema %s features",
+                    missing_feature_count, FEATURE_SCHEMA_VERSION)
     if len(records) < min_records:
         raise ValueError(
             f"hospital {hospital_id} has only {len(records)} validated, "
@@ -345,39 +392,15 @@ def load_single_hospital_partition(
 
 def load_real_partitions(min_records_per_hospital: int = 10,
                          allow_placeholder_labels: bool = False):
+    """Refuse operator-side pooling; real rows must stay in their hospital.
+
+    Kept as a named failing API so stale scripts fail explicitly instead of
+    silently moving raw records into a central M3 process.
     """
-    Returns (hospital_names, partitions) for every active hospital that has
-    at least `min_records_per_hospital` validated vitals records — the same
-    shape data.partition_for_hospitals() produces, so simulate_real.py can
-    reuse simulate.py's train_test_split_per_hospital / FedAvg loop as-is.
-
-    Hospitals below the threshold are skipped (reported, not silently
-    dropped) rather than trained on too little data to mean anything.
-
-    Returns (hospital_names, partitions, provenance) — the third element is
-    new in Sprint A; see `_labels_for`. Provenance is per-hospital, because
-    "2 of 4 hospitals are running on placeholder labels" is a materially
-    different situation from "all 4 are", and a single pooled flag would
-    lose that.
-    """
-    hospital_names, partitions, provenances = [], [], []
-    for hospital in list_active_hospitals():
-        records = fetch_hospital_vitals(
-            hospital["id"], labeled_only=not allow_placeholder_labels
-        )
-        if len(records) < min_records_per_hospital:
-            suffix = "" if allow_placeholder_labels else " with outcome labels"
-            print(f"  skipping {hospital['name']}: only {len(records)} validated records"
-                  f"{suffix} (need >= {min_records_per_hospital})")
-            continue
-
-        X = np.stack([_record_to_features(r) for r in records])
-        y, provenance = _labels_for(records, hospital["name"], allow_placeholder_labels)
-        hospital_names.append(hospital["name"])
-        partitions.append((X, y))
-        provenances.append(provenance)
-
-    return hospital_names, partitions, provenances
+    raise RuntimeError(
+        "Centralized real-data pooling is disabled by the hospital privacy boundary. "
+        "Run client_runner.py inside each hospital with its hospital-scoped credential."
+    )
 
 
 def carve_global_holdout(partitions, test_size: float = 0.15, seed: int = 42):

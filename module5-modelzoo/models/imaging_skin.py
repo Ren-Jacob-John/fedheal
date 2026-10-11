@@ -22,6 +22,8 @@ class EfficientNetSkinLesionModel(SpecialistModel):
     name = "efficientnet-b0-skin-lesion-v1"
     modality = "skin"
     task = "classification"
+    model_version = "untrained"
+    training_status = "untrained"
 
     def __init__(self, num_classes: int = len(CLASS_NAMES), freeze_backbone: bool = True):
         if not TORCH_AVAILABLE:
@@ -40,25 +42,7 @@ class EfficientNetSkinLesionModel(SpecialistModel):
         self.backbone.eval()
 
     def is_available(self) -> bool:
-        return TORCH_AVAILABLE
+        return False
 
     def predict(self, case: dict) -> PredictionResult:
-        image = case["image"]  # (1, 3, 224, 224), preprocessed upstream
-        with torch.no_grad():
-            logits = self.backbone(image)
-            probs = torch.softmax(logits, dim=1)[0]
-            pred_idx = int(torch.argmax(probs).item())
-
-        # Melanoma is the one label where a false negative is most dangerous —
-        # flag it explicitly regardless of raw confidence so the clinician's
-        # UI can highlight it rather than treating all labels as equally routine.
-        label = CLASS_NAMES[pred_idx]
-        return PredictionResult(
-            model_name=self.name,
-            modality=self.modality,
-            task=self.task,
-            label=label,
-            confidence=float(probs[pred_idx].item()),
-            raw_output=probs.tolist(),
-            metadata={"flag_for_urgent_review": label == "melanoma"},
-        )
+        raise RuntimeError("analysis unavailable: no validated imaging model")

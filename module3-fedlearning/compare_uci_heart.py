@@ -17,16 +17,13 @@ Relationship to the other two comparison scripts in this folder:
   * `compare_uci_heart.py` — THIS. Real data, real labels, offline. No
                              services, no network, no database. This is
                              what to run to get a defensible number.
-  * `simulate_real.py`     — real data pulled live from Module 1, which
-                             proves the whole upload -> validate -> store
-                             -> train integration works. Seed it first with
-                             `seed_uci_heart.py` and it trains on this same
-                             Cleveland data through the real pipeline.
+  * `simulate_real.py`     — deprecated and refuses centralized pooling.
+                             The networked, hospital-local path is covered
+                             by `tests/integration/test_federation_flow.py`.
 
-The FedAvg loop and the solo baseline are imported from `fedavg.py`, the
-same ones `simulate_real.py` uses, so the offline number and the
-through-the-stack number are directly comparable rather than two
-independent implementations that happen to agree.
+The FedAvg loop and solo baseline are imported from `fedavg.py`; this offline
+public-data comparison is not a substitute for the hospital-local networked
+integration flow or for clinical validation.
 
 READ `uci_heart.py`'s module docstring before quoting the output. Short
 version: only 3 of the 8 feature slots carry real Cleveland measurements,

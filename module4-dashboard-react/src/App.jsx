@@ -28,12 +28,13 @@ export default function App() {
   const [trainingStatus, setTrainingStatus] = useState(null);
   const [overview, setOverview] = useState(null);
   const [rounds, setRounds] = useState([]);
+  const [retrainingRequests, setRetrainingRequests] = useState([]);
+  const [modelVersions, setModelVersions] = useState([]);
   const [flagsByHospital, setFlagsByHospital] = useState({});
 
   const [view, setView] = useState("map");
   const [selection, setSelection] = useState(null);
   const [pulseSignal, setPulseSignal] = useState(0);
-  const [triggering, setTriggering] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(null);
 
@@ -51,9 +52,19 @@ export default function App() {
       setTrainingStatus(statusRes);
 
       if (role === "super_admin") {
-        const [ov, rd] = await Promise.all([adminApi.overview(tok), adminApi.rounds(tok)]);
+        const [ov, rd, requests, models] = await Promise.all([
+          adminApi.overview(tok),
+          adminApi.rounds(tok),
+          adminApi.retrainingRequests(tok),
+          adminApi.models(tok),
+        ]);
         setOverview(ov);
+        if (roundsRef.current[0]?.id !== rd[0]?.id && rd[0]) {
+          setPulseSignal((signal) => signal + 1);
+        }
         setRounds(rd);
+        setRetrainingRequests(requests);
+        setModelVersions(models);
       }
       setLoadError(null);
     } catch (err) {
@@ -130,43 +141,10 @@ export default function App() {
     setTrainingStatus(null);
     setOverview(null);
     setRounds([]);
+    setRetrainingRequests([]);
+    setModelVersions([]);
     setFlagsByHospital({});
     setSelection(null);
-  }
-
-  async function handleTriggerRound() {
-    if (!me || me.role !== "super_admin") return;
-    setTriggering(true);
-    const prevLatest = roundsRef.current[0]?.round_number ?? null;
-    try {
-      await adminApi.triggerRound(token);
-      setPulseSignal((s) => s + 1);
-
-      let attempts = 0;
-      const poll = setInterval(async () => {
-        attempts += 1;
-        try {
-          const rd = await adminApi.rounds(token);
-          setRounds(rd);
-          const ov = await adminApi.overview(token);
-          setOverview(ov);
-          if (rd[0] && rd[0].round_number !== prevLatest) {
-            setPulseSignal((s) => s + 1);
-            clearInterval(poll);
-            setTriggering(false);
-          }
-        } catch {
-          /* keep polling — the round subprocess may still be starting up */
-        }
-        if (attempts >= 25) {
-          clearInterval(poll);
-          setTriggering(false);
-        }
-      }, 3000);
-    } catch (err) {
-      setLoadError(err instanceof ApiError ? err.message : "Couldn't trigger a round.");
-      setTriggering(false);
-    }
   }
 
   async function handleSetHospitalActive(hospitalId, isActive) {
@@ -235,9 +213,8 @@ export default function App() {
           {me.role === "super_admin" && (
             <RoundsRail
               rounds={rounds}
-              onTrigger={handleTriggerRound}
-              triggering={triggering}
-              canTrigger
+              retrainingRequests={retrainingRequests}
+              modelVersions={modelVersions}
             />
           )}
         </>
@@ -259,8 +236,6 @@ export default function App() {
           overview={overview}
           rounds={rounds}
           flags={selection && selection !== "core" ? flagsByHospital[selection] : null}
-          onTriggerRound={handleTriggerRound}
-          triggering={triggering}
           onUploaded={() => loadAll(token, me.role, { silent: true })}
           onSetHospitalActive={handleSetHospitalActive}
         />

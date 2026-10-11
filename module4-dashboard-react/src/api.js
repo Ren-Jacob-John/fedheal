@@ -196,9 +196,13 @@ export const authApi = {
   listScans(token, caseId) {
     return request(AUTH_API_BASE, `/cases/${caseId}/scans`, { token });
   },
-  reviewCase(token, caseId, decision, clinicianNote) {
+  listCaseAnalyses(token, caseId) {
+    return request(AUTH_API_BASE, `/cases/${caseId}/analyses`, { token });
+  },
+  reviewCase(token, caseId, decision, clinicianNote, analysisId = null) {
     return request(AUTH_API_BASE, `/cases/${caseId}/review`, {
-      method: "POST", token, body: { decision, clinician_note: clinicianNote || null },
+      method: "POST", token,
+      body: { decision, clinician_note: clinicianNote || null, analysis_id: analysisId },
     });
   },
 };
@@ -216,17 +220,18 @@ export const adminApi = {
     return request(ADMIN_API_BASE, `/admin/rounds?limit=${limit}`, { token });
   },
 
+  retrainingRequests(token, limit = 100) {
+    return request(ADMIN_API_BASE, `/admin/retraining/requests?limit=${limit}`, { token });
+  },
+
+  models(token) {
+    return request(ADMIN_API_BASE, "/admin/models", { token });
+  },
+
   flags(token, hospitalId, limit = 50) {
     const qs = new URLSearchParams({ limit: String(limit) });
     if (hospitalId) qs.set("hospital_id", hospitalId);
     return request(ADMIN_API_BASE, `/admin/flags?${qs.toString()}`, { token });
-  },
-
-  triggerRound(token) {
-    return request(ADMIN_API_BASE, "/admin/rounds/trigger", {
-      method: "POST",
-      token,
-    });
   },
 
   setHospitalStatus(token, hospitalId, isActive) {

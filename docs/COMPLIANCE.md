@@ -36,8 +36,10 @@ sign-off. Imaging, genomic and CBC specialists are stubs (see DEVELOPMENT_PLAN Â
 5. **No retention or deletion workflow.** There is no endpoint or job that
    deletes a patient's records on request (GDPR Art. 17) or expires them.
 6. **No data export for a data subject** (Art. 15/20).
-7. **Encryption at rest** depends entirely on the database host (Postgres
-   volume / managed service); the application does not encrypt columns.
+7. **Encryption at rest** depends entirely on the database host (Firestore
+   in production, whose at-rest encryption and key management you configure in
+   your Google Cloud project; the local JSON-file store used in development is
+   unencrypted plain text); the application does not encrypt fields.
 8. **Federated weights can leak.** Model updates can be inverted or used for
    membership inference. There is no differential privacy or secure aggregation.
 9. **No bias or subgroup validation.** The only evaluation is on 3 real features

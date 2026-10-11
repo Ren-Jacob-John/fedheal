@@ -7,12 +7,8 @@ client sends in the request body; creating an administrator must only be
 possible through POST /admin/users, and only for an already-authenticated
 SUPER_ADMIN.
 
-Uses a throwaway SQLite file per test session (not fedmed_auth.db) so
-these tests never touch real data, and builds the schema directly from
-the SQLAlchemy models (Base.metadata.create_all) rather than requiring
-alembic to be run first — see module1-auth.md's "Database schema" note
-about alembic being the source of truth for *deployed* environments;
-tests intentionally don't depend on that.
+Uses the in-memory document store (FEDHEAL_DB_BACKEND=memory), so these tests
+never touch real data or need a Firebase project.
 
 Run:
     pip install -r requirements.txt pytest
@@ -24,28 +20,17 @@ import uuid
 import pytest
 
 # Must be set before `database` (and therefore `main`) is imported, since
-# database.py reads FEDHEAL_DATABASE_URL at import time.
-_TEST_DB_PATH = f"./_test_auth_{uuid.uuid4().hex}.db"
-os.environ["FEDHEAL_DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
+# database.py picks the backend at import time.
+os.environ.setdefault("FEDHEAL_DB_BACKEND", "memory")  # conftest.py normally selects the shared file store
 os.environ["FEDHEAL_ALLOW_PUBLIC_REGISTRATION"] = "true"  # these tests are about the open path's escalation guards
 
 import database  # noqa: E402
 import models  # noqa: E402
 
-database.Base.metadata.create_all(bind=database.engine)
-
 import main  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 client = TestClient(main.app)
-
-
-@pytest.fixture(autouse=True, scope="session")
-def _cleanup_test_db():
-    yield
-    database.engine.dispose()
-    if os.path.exists(_TEST_DB_PATH):
-        os.remove(_TEST_DB_PATH)
 
 
 # ---------- Helpers ----------
@@ -66,11 +51,7 @@ def _super_admin_token_for_setup() -> str:
     """
     global _bootstrap_super_admin_token
     if _bootstrap_super_admin_token is None:
-        session = database.SessionLocal()
-        try:
-            _, _bootstrap_super_admin_token = _seed_super_admin(session)
-        finally:
-            session.close()
+        _, _bootstrap_super_admin_token = _seed_super_admin(database.repo)
     return _bootstrap_super_admin_token
 
 
@@ -120,20 +101,15 @@ def _seed_super_admin(db_session) -> tuple[dict, str]:
         role=models.Role.SUPER_ADMIN,
         hospital_id=None,
     )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    db_session.create_user(user)
     token = _login(email, password)
     return {"id": user.id, "email": email, "role": user.role.value}, token
 
 
 @pytest.fixture()
 def db_session():
-    session = database.SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
+    """The repository (the old tests called this a session)."""
+    return database.repo
 
 
 # ---------- 1. Anonymous user cannot create SUPER_ADMIN via /register ----------
@@ -156,13 +132,9 @@ def test_anonymous_register_cannot_create_super_admin():
 
     # Confirm the DB agrees with the API response, not just the response
     # shape — the ORM object, not the JSON, is the ground truth.
-    db = database.SessionLocal()
-    try:
-        stored = db.query(models.User).filter(models.User.email == email).first()
-        assert stored is not None
-        assert stored.role == models.Role.CLINICIAN
-    finally:
-        db.close()
+    stored = database.repo.get_user_by_email(email)
+    assert stored is not None
+    assert stored.role == models.Role.CLINICIAN
 
 
 # ---------- 2. Anonymous user cannot create ADMIN (hospital_admin) via /register ----------
@@ -294,12 +266,8 @@ def test_clinician_cannot_self_escalate_via_register_again():
     )
     assert second.status_code == 400  # "Email already registered"
 
-    db = database.SessionLocal()
-    try:
-        stored = db.query(models.User).filter(models.User.email == email).first()
-        assert stored.role == models.Role.CLINICIAN
-    finally:
-        db.close()
+    stored = database.repo.get_user_by_email(email)
+    assert stored.role == models.Role.CLINICIAN
 
 
 def test_hospital_admin_cannot_escalate_self_to_super_admin(db_session):
@@ -333,11 +301,7 @@ def test_admin_endpoint_rejects_clinician_role():
     paths cleanly separated rather than letting this endpoint become a
     second, differently-guarded way to do what /register already does.
     """
-    db = database.SessionLocal()
-    try:
-        _, super_token = _seed_super_admin(db)
-    finally:
-        db.close()
+    _, super_token = _seed_super_admin(database.repo)
     hospital = _make_hospital()
 
     resp = client.post(

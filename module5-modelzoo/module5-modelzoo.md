@@ -43,10 +43,11 @@ is worse than an explicit "I don't have a specialist for this" error.
     most realistic "real model" in the zoo today.
   - `imaging_chest_xray.py`, `imaging_retina.py`, `imaging_skin.py`
     (DenseNet201/ResNet50/EfficientNet-B0 legacy tier) and
-    `imaging_segmentation.py` (custom U-Net legacy tier) — architecturally
-    complete, correct transfer-learning setups, but **need
-    `torch`/`torchvision` installed and have never been run or trained in
-    this environment**.
+    `imaging_segmentation.py` (custom U-Net legacy tier) — untrained
+    architectures, not clinical models. Registry selection is blocked unless
+    a specialist declares validated status plus dataset/license and weight
+    hash provenance. No such model is present, so imaging analysis is
+    unavailable; stubs do not produce labels or heatmaps.
   - `foundation_biomedclip.py`, `foundation_nnunet.py`, `foundation_evo2.py`,
     `foundation_radfm.py`, `foundation_segvol.py`, `foundation_omiclip.py`,
     `foundation_biomedparse.py` — current-tier foundation-model upgrades.
@@ -56,9 +57,9 @@ is worse than an explicit "I don't have a specialist for this" error.
     `foundation_radfm.py` and `foundation_omiclip.py` additionally raise
     `NotImplementedError` explicitly even when their repos are reachable
     — see each file's own docstring for exactly what's blocking it.
-  - `stub.py` — `StubSpecialistModel`, the honest placeholder: implements
-    the same interface, always returns `is_stub=True`, so nothing
-    downstream can mistake it for a real diagnosis.
+  - `stub.py` — `StubSpecialistModel`, the unavailable placeholder: it
+    returns an explicit unavailable label with zero confidence and
+    `is_stub=True`; the router refuses to present it as a finding.
 - `demo.py` — runnable example exercising the registry/router/fusion
   chain end-to-end with a mix of real and stub specialists.
 

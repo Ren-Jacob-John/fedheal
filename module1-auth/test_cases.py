@@ -250,12 +250,24 @@ class TestCaseVitals:
         assert r.status_code == 200 and r.json()["validation_status"] == "passed"
         rows = client.get(f"/cases/{cid}/vitals", headers=bearer(world["doc_a"])).json()
         assert len(rows) == 1 and rows[0]["patient_ref"] == "PAT-V-1"
-        s = sx.database.SessionLocal()
-        try:
-            row = s.query(models.VitalsRecord).filter_by(id=rows[0]["id"]).one()
-            assert row.hospital_id == world["ha"] and row.case_id == cid
-        finally:
-            s.close()
+        row = sx.database.repo.get_vitals(rows[0]["id"])
+        assert row.hospital_id == world["ha"] and row.case_id == cid
+
+    def test_optional_vitals_are_stored_and_omissions_remain_null(self, world, monkeypatch):
+        monkeypatch.setattr(main.httpx, "AsyncClient", _fake_m2("passed"))
+        cid = _case(world["doc_a"], "PAT-V-OPTIONAL").json()["id"]
+        record = {**GOOD, "temperature_c": 36.8, "spo2_percent": 98, "respiratory_rate_bpm": 16}
+        assert client.post(f"/cases/{cid}/vitals", headers=bearer(world["doc_a"]),
+                           json={"record": record}).status_code == 200
+        saved = client.get(f"/cases/{cid}/vitals", headers=bearer(world["doc_a"])).json()[0]
+        assert (saved["temperature_c"], saved["spo2_percent"], saved["respiratory_rate_bpm"]) == (36.8, 98, 16)
+
+        cid2 = _case(world["doc_a"], "PAT-V-OPTIONAL-MISSING").json()["id"]
+        assert client.post(f"/cases/{cid2}/vitals", headers=bearer(world["doc_a"]),
+                           json={"record": GOOD}).status_code == 200
+        saved_missing = client.get(f"/cases/{cid2}/vitals", headers=bearer(world["doc_a"])).json()[0]
+        assert saved_missing["temperature_c"] is saved_missing["spo2_percent"] is None
+        assert saved_missing["respiratory_rate_bpm"] is None
 
     def test_rejected_record_is_not_stored_and_reasons_returned(self, world, monkeypatch):
         monkeypatch.setattr(main.httpx, "AsyncClient", _fake_m2("rejected"))
@@ -296,11 +308,7 @@ class TestReview:
     def test_review_does_not_create_training_labels(self, world):
         cid = _case(world["doc_a"], "PAT-R-nolabel").json()["id"]
         client.post(f"/cases/{cid}/review", json={"decision": "ACCEPTED"}, headers=bearer(world["doc_a"]))
-        s = sx.database.SessionLocal()
-        try:
-            assert s.query(models.VitalsRecord).filter_by(case_id=cid).count() == 0
-        finally:
-            s.close()
+        assert sx.database.repo.list_case_vitals(cid, world["ha"]) == []
 
     def test_review_note_never_in_audit_log(self, world, caplog):
         cid = _case(world["doc_a"], "PAT-R-log").json()["id"]
@@ -324,7 +332,7 @@ class TestRegistrationClosed:
     def test_default_configuration_is_closed(self):
         import subprocess, sys, os, pathlib
         env = {k: v for k, v in os.environ.items() if not k.startswith("FEDHEAL_ALLOW")}
-        env.update({"FEDHEAL_ENV": "development", "FEDHEAL_DATABASE_URL": "sqlite:////tmp/fedheal_reg_default.db"})
+        env.update({"FEDHEAL_ENV": "development", "FEDHEAL_DB_BACKEND": "memory"})
         out = subprocess.run([sys.executable, "-c", "import main; print(main.PUBLIC_REGISTRATION_ENABLED)"],
                              cwd=pathlib.Path(__file__).parent, env=env, capture_output=True, text=True, timeout=60)
         assert out.stdout.strip().endswith("False"), out.stderr[-400:]

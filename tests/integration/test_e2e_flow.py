@@ -7,7 +7,7 @@ End-to-end integration: the real services, real HTTP, nothing mocked.
       ->  specialist (Module 5)  ->  structured response
 
 Starts Module 1, Module 2 and Module 8 as uvicorn subprocesses on free
-ports against a throwaway SQLite file, with FEDHEAL_ENV=development (the
+ports against a throwaway JSON-file document store (FEDHEAL_DB_BACKEND=local), with FEDHEAL_ENV=development (the
 dev-only fallbacks are what let separate processes agree on keys without
 any real secret in this repo).
 
@@ -82,13 +82,11 @@ class Service:
 @pytest.fixture(scope="module")
 def stack():
     tmp = tempfile.mkdtemp(prefix="fedheal_e2e_")
-    db_url = f"sqlite:///{tmp}/auth.db"
     p1, p2, p8, p8b = free_port(), free_port(), free_port(), free_port()
 
-    m1_env = base_env(FEDHEAL_DATABASE_URL=db_url, FEDHEAL_VALIDATION_API_URL=f"http://127.0.0.1:{p2}")
-    # Schema comes from the models here (tests only); deployments use Alembic.
-    subprocess.run([sys.executable, "-c", "import database, models; database.Base.metadata.create_all(bind=database.engine)"],
-                   cwd=ROOT / "module1-auth", env=m1_env, check=True, timeout=60)
+    # Throwaway JSON-file document store shared by the service and the operator script (no schema to create).
+    m1_env = base_env(FEDHEAL_DB_BACKEND="local", FEDHEAL_LOCAL_STORE_PATH=f"{tmp}/auth_store.json",
+                      FEDHEAL_VALIDATION_API_URL=f"http://127.0.0.1:{p2}")
     subprocess.run([sys.executable, "create_super_admin.py", "--email", "admin@e2e.fedheal.local"],
                    cwd=ROOT / "module1-auth", env={**m1_env, "FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD": ADMIN_PASSWORD},
                    check=True, timeout=60, capture_output=True)

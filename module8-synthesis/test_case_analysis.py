@@ -32,6 +32,9 @@ def bundle(monkeypatch):
     async def fake(case_id, token):
         return holder
     monkeypatch.setattr(main, "fetch_case_bundle", fake)
+    async def fake_persist(case_id, token, packet):
+        return "analysis-test-id"
+    monkeypatch.setattr(main, "persist_case_analysis", fake_persist)
     return holder
 
 
@@ -46,8 +49,17 @@ def test_complete_case_reports_modalities_model_status_and_review_flag(bundle):
     assert b["available_modalities"] == ["vitals", "medical_history"]
     assert {"scan", "labs"} <= set(b["missing_modalities"])
     assert b["clinician_review_required"] is True
+    assert b["requires_clinician_review"] is True
+    assert b["reasoning"]["input_drivers"][0]["source"] == "vitals"
+    assert b["reasoning"]["input_drivers"][0]["used_by_model"] is True
+    assert b["reasoning"]["feature_contributions"] == b["explanation"]["contributions"]
+    assert b["suggested_considerations"]["status"] == "matched"
+    assert b["suggested_considerations"]["items"][0]["validation_status"] == (
+        "unvalidated - for clinician review"
+    )
     assert b["model"]["status"] == "FALLBACK" and b["stub_or_fallback"] is True   # demo-fit model, never VALIDATED
     assert b["model"]["name"] and b["model"]["version"]
+    assert b["analysis_id"] == "analysis-test-id"
     assert b["safety"]["banner"].startswith("AI Clinical Decision Support")
     assert "Imaging evidence" not in b["basis_statement"] and "Scan evidence was not available" in b["basis_statement"]
     assert b["uncertainty"]["calibrated"] is False
@@ -116,11 +128,36 @@ def test_other_hospitals_case_is_forbidden_end_to_end(monkeypatch):
     assert analyze().status_code == 403
 
 
+def test_analysis_is_not_reported_as_success_when_persistence_fails(bundle, monkeypatch):
+    async def persistence_failure(case_id, token, packet):
+        raise main._error(502, "analysis_persistence_failed", "Could not save analysis.")
+    monkeypatch.setattr(main, "persist_case_analysis", persistence_failure)
+    response = analyze()
+    assert response.status_code == 502
+    assert response.json()["detail"]["status"] == "analysis_persistence_failed"
+
+
 def test_no_treatment_or_diagnosis_fields(bundle):
     b = analyze().json()
     text = str(b).lower()
     for banned in ("prescri", "dosage", "treatment plan", "definitive diagnosis"):
         assert banned not in text.replace("not a diagnosis", "")
+
+
+def test_analysis_has_no_dosing_or_drug_recommendations(bundle):
+    text = str(analyze().json()).lower()
+    for banned in ("dosage", "dose:", "prescribe", "aspirin", "amlodipine"):
+        assert banned not in text
+
+
+def test_considerations_without_an_exact_rule_match_are_explicitly_unavailable():
+    result = main.considerations.considerations_for("pneumonia")
+    assert result == {
+        "ruleset_version": "1.0.0",
+        "status": "no_match",
+        "message": "no suggestion available",
+        "items": [],
+    }
 
 
 def test_uploaded_scan_is_reported_stored_but_never_analysed(bundle):

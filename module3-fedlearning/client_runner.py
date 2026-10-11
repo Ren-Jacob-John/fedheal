@@ -26,15 +26,15 @@ Usage — start the server once:
 Need 2+ of these running (server.py's FedAvg strategy sets
 min_available_clients=2) before a round will actually start.
 
-TLS is explicitly out of scope for this pass — see
-docs/development-plan-to-oct20.md's cut list ("TLS/production-grade
-multi-host security" is deferred past Oct 20). --insecure defaults to True,
-matching server.py's plaintext 0.0.0.0:8080 listener; this is fine for a
-localhost/LAN demo and not fine for real hospital traffic over the
-open internet.
+TLS defaults to insecure/plaintext for compatibility with a localhost demo.
+For server-authenticated TLS, start server.py with its CA/server certificate
+and private key, then pass --secure and (for a private CA) --root-certificates.
+Client-certificate mTLS is not supported by this Flower client adapter.
 """
 import argparse
+import os
 import sys
+import time
 
 import httpx
 import numpy as np
@@ -44,6 +44,8 @@ import flwr as fl
 
 from client import HospitalClient
 from real_data import load_single_hospital_partition, resolve_hospital_id
+
+ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
 
 
 def parse_args() -> argparse.Namespace:
@@ -99,12 +101,139 @@ def parse_args() -> argparse.Namespace:
         "--secure",
         dest="insecure",
         action="store_false",
-        help="Use a TLS connection instead of plaintext gRPC. Not supported "
-             "by server.py yet (see module docstring) — only pass this once "
-             "the server actually terminates TLS.",
+        help="Use TLS instead of plaintext gRPC. The server must be started with TLS certificates.",
+    )
+    parser.add_argument(
+        "--root-certificates",
+        help="Optional PEM root CA file for verifying a private Flower server certificate.",
+    )
+    parser.add_argument(
+        "--watch-retraining",
+        action="store_true",
+        help="Poll Module 7 for durable hospital-scoped retraining requests. "
+             "Requires FEDHEAL_SVC_TOKEN_M3_M7; queue thresholds are OFF by default.",
+    )
+    parser.add_argument(
+        "--poll-seconds",
+        type=int,
+        default=60,
+        help="Seconds between retraining queue checks in watch mode (default: 60).",
     )
     parser.set_defaults(insecure=True)
     return parser.parse_args()
+
+
+def _retraining_headers() -> dict[str, str]:
+    token = os.environ.get("FEDHEAL_SVC_TOKEN_M3_M7", "").strip()
+    if not token:
+        raise RuntimeError(
+            "Watch mode requires a hospital-scoped FEDHEAL_SVC_TOKEN_M3_M7 "
+            "minted by module7-admin/mint_retraining_runner_token.py."
+        )
+    return {"X-Service-Key": token}
+
+
+def _retraining_request(method: str, path: str, *, headers: dict, json_body: dict | None = None) -> httpx.Response:
+    response = httpx.request(method, f"{ADMIN_API_URL}{path}", headers=headers, json=json_body, timeout=10)
+    response.raise_for_status()
+    return response
+
+
+def _execute_partition(args: argparse.Namespace, hospital_id: str, X, y, provenance,
+                       retraining_request_id: str | None = None) -> None:
+    print(f"  {provenance.banner()}")
+    classes, counts = np.unique(y, return_counts=True)
+    stratify = y if len(classes) > 1 and counts.min() >= 2 else None
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=args.test_size, random_state=42, stratify=stratify,
+    )
+    print(
+        f"  {len(X_train)} train / {len(X_test)} local-test records, "
+        f"positive-class rate {y_train.mean():.2f} — this data never leaves this process."
+    )
+    client = HospitalClient(
+        hospital_id, X_train, y_train, X_test, y_test,
+        training_provenance={
+            "validated_training_examples": 0 if args.include_flagged else len(X_train),
+            "hospital_label_training_examples": 0 if not provenance.is_clean else len(X_train),
+        },
+        retraining_request_id=retraining_request_id,
+    )
+    print(f"Connecting to Flower server at {args.server} "
+          f"({'insecure' if args.insecure else 'TLS'})...")
+    fl.client.start_client(
+        server_address=args.server,
+        client=client.to_client(),
+        insecure=args.insecure,
+        root_certificates=args.root_certificates,
+    )
+    print("Disconnected from server (training finished or connection closed).")
+
+
+def watch_retraining(args: argparse.Namespace, hospital_id: str) -> None:
+    if args.poll_seconds < 1:
+        raise ValueError("--poll-seconds must be >= 1")
+    if args.include_flagged or args.allow_placeholder_labels:
+        raise ValueError(
+            "watch mode excludes flagged and placeholder-labeled records; "
+            "these options are available only for explicit local demos"
+        )
+    headers = _retraining_headers()
+    print(f"Watching Module 7 for retraining requests scoped to hospital {hospital_id}.")
+    while True:
+        try:
+            X, y, provenance = load_single_hospital_partition(
+                hospital_id,
+                min_records=1,
+                include_flagged=False,
+                allow_placeholder_labels=False,
+            )
+        except ValueError as exc:
+            print(f"Eligible local dataset not ready: {exc}")
+            time.sleep(args.poll_seconds)
+            continue
+        _retraining_request(
+            "POST", "/admin/retraining/eligibility", headers=headers,
+            json_body={"eligible_records": int(len(y))},
+        )
+        if len(y) < args.min_records:
+            time.sleep(args.poll_seconds)
+            continue
+        request = _retraining_request(
+            "GET", "/admin/retraining/requests/next", headers=headers,
+        ).json()
+        if request is None:
+            time.sleep(args.poll_seconds)
+            continue
+        request_id = request["id"]
+        status = "FAILED"
+        try:
+            _execute_partition(args, hospital_id, X, y, provenance, retraining_request_id=request_id)
+            candidate_status = _retraining_request(
+                "GET", f"/admin/retraining/requests/{request_id}/candidate", headers=headers,
+            ).json()
+            if not candidate_status.get("registered"):
+                raise RuntimeError(
+                    "Flower run ended without a provenance-linked candidate in Module 7; "
+                    "the request will be marked FAILED and its eligibility baseline will not advance."
+                )
+            status = "COMPLETED"
+        finally:
+            try:
+                _, completed_y, _ = load_single_hospital_partition(
+                    hospital_id, min_records=1, include_flagged=False,
+                    allow_placeholder_labels=False,
+                )
+                completed_count = int(len(completed_y))
+            except ValueError:
+                completed_count = 0
+            except httpx.HTTPError:
+                completed_count = None
+            _retraining_request(
+                "POST", "/admin/retraining/requests/complete", headers=headers,
+                json_body={"request_id": request_id, "status": status,
+                           "eligible_records": completed_count},
+            )
 
 
 def main() -> None:
@@ -118,6 +247,14 @@ def main() -> None:
             print(f"Could not resolve hospital name {args.hospital_name!r}: {e}")
             sys.exit(1)
 
+    if args.watch_retraining:
+        try:
+            watch_retraining(args, hospital_id)
+        except (httpx.HTTPError, ValueError, RuntimeError) as e:
+            print(f"Retraining watch stopped: {e}")
+            sys.exit(1)
+        return
+
     print(f"Loading validated vitals for hospital {hospital_id} from Module 1...")
     try:
         X, y, provenance = load_single_hospital_partition(
@@ -130,42 +267,7 @@ def main() -> None:
         print(f"Could not load this hospital's data: {e}")
         sys.exit(1)
 
-    # Printed before any training starts, so an operator watching the
-    # console sees the label situation first rather than discovering it
-    # after eight rounds of plausible-looking accuracy numbers.
-    print(f"  {provenance.banner()}")
-
-    # Stratifying needs every class to have >= 2 members (one can go to
-    # train, one to test) — "more than one distinct class" isn't enough,
-    # as the smoke test surfaced: a hospital can easily have exactly one
-    # positive-class record among --min-records, which sklearn rejects.
-    # Falling back to a plain (non-stratified) split there is the honest
-    # move — it's what would happen anyway once a class is too rare to
-    # stratify meaningfully.
-    classes, counts = np.unique(y, return_counts=True)
-    stratify = y if len(classes) > 1 and counts.min() >= 2 else None
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=args.test_size,
-        random_state=42,
-        stratify=stratify,
-    )
-    print(
-        f"  {len(X_train)} train / {len(X_test)} local-test records, "
-        f"positive-class rate {y_train.mean():.2f} — this data never leaves this process."
-    )
-
-    client = HospitalClient(hospital_id, X_train, y_train, X_test, y_test)
-
-    print(f"Connecting to Flower server at {args.server} "
-          f"({'insecure' if args.insecure else 'TLS'})...")
-    fl.client.start_client(
-        server_address=args.server,
-        client=client.to_client(),
-        insecure=args.insecure,
-    )
-    print("Disconnected from server (training finished or connection closed).")
+    _execute_partition(args, hospital_id, X, y, provenance)
 
 
 if __name__ == "__main__":

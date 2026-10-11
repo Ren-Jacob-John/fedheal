@@ -79,19 +79,19 @@ Nothing was run in Docker/Compose yet; "Done" does not mean clinically validated
 | Two-level user creation (developers → hospital user → doctors), no public sign-up | **Done** | |
 | Hospital data isolation | **Done** | enforced from the token; cross-hospital access refused and audited |
 | Doctor enters condition, history, vitals | **Done** | cases, structured history, case-linked validated vitals |
-| Doctor uploads scans | **Partial** | scans are **stored and linked to the case only**; no scan analysis |
-| AI result for the patient | **Partial** | one runnable model (heart-risk on vitals), trained on small public data; not clinically useful yet |
-| Reasoning behind the result | **Partial** | per-feature contributions and a list of missing inputs; history/symptoms are not yet model inputs |
-| Suggested next steps / "solution" for the doctor | **Planned** | will come from a reviewable rule file with a source per rule, never invented, no drug dosing |
-| Doctor review (accept / override / needs more data) | **Done** | |
+| Doctor uploads scans | **Partial** | scans are stored and linked; the authenticated analysis route reports unavailable because there is no validated imaging model |
+| AI result for the patient | **Partial** | one runnable heart-risk model on vitals, trained on small public data; not clinically useful or validated |
+| Reasoning behind the result | **Partial** | feature contributions, missing/unused inputs, and a clinician-review flag; history/symptoms remain context-only |
+| Suggested next steps for the doctor | **Partial** | suggestions come only from versioned, provenance-tagged rules marked unvalidated for clinician review; no match means no suggestion |
+| Doctor review (accept / override / needs more data) | **Done** | reviews may link to an analysis but are not training labels |
 | Federated training across hospitals (FedAvg) | **Done** | 2-hospital flow tested through the real services |
 | Model registry, validation gate, promotion, rollback | **Done** | no automatic deployment |
-| Model improves by itself over time | **Partial** | retraining is started manually; automatic (but still gated) triggering is **Planned** |
-| Saved AI-analysis history per case | **Planned** | analyses are not persisted yet |
-| Extra vitals (temperature, SpO2, respiratory rate) | **Planned** | |
+| Model improves over time | **Partial** | count-triggered retraining requests are off by default; candidates require validation and explicit super-admin promotion |
+| Saved AI-analysis history per case | **Done** | append-only, hospital-scoped, structured identifiers/output only |
+| Extra vitals (temperature, SpO2, respiratory rate) | **Partial** | nullable storage, validation and upload support exist; no promoted model consumes them yet |
 | Imaging models (chest X-ray, retina, skin, CT) | **Planned** | stubs only; no validated models or weights in the repo |
 | Federated-update privacy: TLS, clipping, differential privacy, secure aggregation | **Planned** | today the aggregation server sees each hospital's weight update, so it must run on a trusted network |
-| Docker Compose run, browser E2E test | **Planned** | Compose file exists but has never been run |
+| Docker Compose run, browser E2E test | **Partial** | Compose and CI browser job are configured; neither runtime was executed in the current environment |
 
 Honest model status, recorded numbers, and gate thresholds: [`docs/MODEL_STATUS.md`](docs/MODEL_STATUS.md).
 What is deliberately not done: [`docs/MVP_SCOPE.md`](docs/MVP_SCOPE.md).
@@ -152,7 +152,7 @@ More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/API.md`](doc
 ### Prerequisites
 
 - Python 3.11+ and Node.js 18+
-- No GPU is needed for the core demo. The database falls back to SQLite when no URL is set.
+- No GPU is needed for the core demo. In development the services keep their data in a local JSON-file store (no database to install); staging/production use Firebase Firestore (see `docs/FIRESTORE_MIGRATION.md`).
 
 ### Environment
 
@@ -175,16 +175,16 @@ Copy `deploy/compose.env.example` to `.env` and fill the secrets
 ### Start the stack
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
+python -m venv .venv && . .venv\Scripts\activate
 pip install -r module1-auth/requirements.txt -r module2-validation/requirements.txt \
   -r module3-fedlearning/requirements.txt -r module6-condition-router/requirements.txt \
   -r module7-admin/requirements.txt -r module8-synthesis/requirements.txt
 
-export FEDHEAL_ENV=development FEDHEAL_DATABASE_URL=sqlite:////tmp/fedheal.db \
+export FEDHEAL_ENV=development \
   FEDHEAL_DASHBOARD_ORIGIN=http://localhost:5173 \
   FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD=demo-bootstrap-password-1
 
-(cd module1-auth && alembic upgrade head && python create_super_admin.py --email admin@demo.local)
+(cd module1-auth && python create_super_admin.py --email admin@demo.local)
 (cd module1-auth && uvicorn main:app --port 8001) &
 (cd module2-validation && uvicorn main:app --port 8002) &
 (cd module7-admin && uvicorn main:app --port 8005) &
@@ -200,8 +200,10 @@ The full step-by-step flow is in [`docs/DEMO_RUNBOOK.md`](docs/DEMO_RUNBOOK.md).
 2. As a hospital user, create a doctor.
 3. As the doctor, create a case, then add vitals and history (and optionally a scan).
 4. Run AI analysis. Before any model is promoted, the correct answer is `MODEL_UNAVAILABLE`.
-5. Seed two hospitals with public heart data and run federated training
-   (`seed_uci_heart.py --hospitals 2`, then `simulate_real.py`). A **candidate** model is registered.
+5. To verify federated training, run `python -m pytest -q tests/integration/test_federation_flow.py`
+   from the repository root. It seeds public UCI data, uses clearly named synthetic-only threshold
+   records, and starts hospital-local networked clients. The candidate is registered but not deployed.
+   Do not run `simulate_real.py`: central pooling is disabled by the privacy boundary.
 6. Validate the candidate. With the default gate the recorded public-data run is **rejected**, which is the
    honest result. A relaxed test policy exists only to demonstrate the wiring.
 7. Promote a passing model, run analysis again, then record a doctor review.
@@ -236,9 +238,9 @@ See [`docs/TESTING.md`](docs/TESTING.md). Known gap: Module 3 tests are not in C
 | Validation | rules plus Isolation Forest outlier detection |
 | Model zoo (scaffolded) | XGBoost, TabPFN, LightGBM, PyTorch imaging and segmentation models. Most are stubs until weights and data exist |
 | Explainability | linear feature contributions (promoted model), SHAP (demo model), Grad-CAM and knowledge graph (scaffolded) |
-| APIs | FastAPI, Pydantic, SQLAlchemy, Alembic (Modules 1 and 7) |
+| APIs | FastAPI, Pydantic (Modules 1 and 7 store data through `docstore.py` / `repo.py`) |
 | Auth | bcrypt password hashing, JWT for users, scoped signed tokens between services |
-| Database | PostgreSQL in Compose, SQLite for local development |
+| Database | Firebase Firestore (the Firestore emulator in Compose, a local JSON-file store for development) |
 | Frontend | React 18 + Vite |
 
 ---

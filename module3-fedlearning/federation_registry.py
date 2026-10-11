@@ -19,6 +19,7 @@ import numpy as np
 
 import config
 import service_auth
+from privacy import update_transform_config
 
 ADMIN_API_URL = os.environ.get("FEDHEAL_ADMIN_API_URL", "http://localhost:8005")
 MODEL_NAME = "vitals-fedavg-logreg"
@@ -59,12 +60,18 @@ def verify_artifact(path: str | os.PathLike, expected_hash: str) -> bool:
 
 def build_candidate_payload(*, condition: str, training_round: int, hospital_labels: list[str],
                             global_accuracy: float, n_eval: int, per_hospital_accuracy: dict[str, float],
-                            local_only_baseline: float, majority_class_floor: float | None,
-                            digest: str, provenances: list, data_source: str,
-                            params: list | None = None, input_spec: dict | None = None) -> dict:
+                            local_only_baseline: float | None, majority_class_floor: float | None,
+                            digest: str, provenances: list | None, data_source: str,
+                            params: list | None = None, input_spec: dict | None = None,
+                            transport_encryption: str = "in-process; no update transport",
+                            labels_from_hospital_only: bool | None = None,
+                            retraining_request_ids: list[str] | None = None,
+                            eval_set: str = "pooled global holdout carved before local training") -> dict:
     """Aggregate-only candidate description. Attestations are DERIVED, not asserted:
     labels_from_hospital_only is True only if no hospital's labels were placeholders."""
-    clean = all(getattr(p, "is_clean", False) for p in provenances)
+    clean = (all(getattr(p, "is_clean", False) for p in (provenances or []))
+             if labels_from_hospital_only is None else labels_from_hospital_only is True)
+    clip_norm, noise_multiplier = update_transform_config()
     return {
         "model_name": MODEL_NAME,
         "condition": condition,
@@ -77,17 +84,22 @@ def build_candidate_payload(*, condition: str, training_round: int, hospital_lab
             "data_source": data_source,
             "validated_records_only": True,        # real_data.load_real_partitions drops flagged records
             "labels_from_hospital_only": bool(clean),
-            "differential_privacy": False,
+            "differential_privacy": False,  # no privacy accountant; epsilon is not computed
             "secure_aggregation": False,
-            "update_clipping": False,
-            "transport_encryption": "none (plaintext gRPC; development)",
+            "update_clipping": clip_norm > 0,
+            **({"update_clip_norm": clip_norm} if clip_norm > 0 else {}),
+            "gaussian_update_noise": noise_multiplier > 0,
+            **({"update_noise_multiplier": noise_multiplier} if noise_multiplier > 0 else {}),
+            "transport_encryption": transport_encryption,
+            **({"retraining_request_ids": list(retraining_request_ids)} if retraining_request_ids else {}),
         },
         "metrics": {
             "accuracy": float(global_accuracy),
             "n_eval": int(n_eval),
-            "eval_set": "pooled global holdout carved before local training",
+            "eval_set": eval_set,
             "per_hospital_accuracy": {k: float(v) for k, v in per_hospital_accuracy.items()},
-            "local_only_baseline_accuracy": float(local_only_baseline),
+            **({"local_only_baseline_accuracy": float(local_only_baseline)}
+               if local_only_baseline is not None else {}),
             **({"majority_class_floor": float(majority_class_floor)} if majority_class_floor is not None else {}),
         },
         "artifact_hash": digest,

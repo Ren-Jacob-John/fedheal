@@ -4,6 +4,7 @@ import { authApi, ApiError } from "../api.js";
 const PLACEHOLDER = `[
   {"patient_ref": "P-014", "age_years": 61, "height_cm": 168, "weight_kg": 82,
    "systolic_bp": 138, "diastolic_bp": 88, "heart_rate_bpm": 79,
+   "temperature_c": null, "spo2_percent": null, "respiratory_rate_bpm": null,
    "medication_count": 2, "medication_mg_total": 120,
    "label": 0}
 ]`;
@@ -98,8 +99,10 @@ export default function UploadPanel({ token, onUploaded }) {
           <p className="upload__hint upload__hint--small">
             Expected columns: patient_ref, age_years, height_cm, weight_kg,
             systolic_bp, diastolic_bp, heart_rate_bpm, medication_count,
-            medication_mg_total, label (optional). Missing optional columns
-            are fine.
+            medication_mg_total, temperature_c, spo2_percent,
+            respiratory_rate_bpm, label (optional). Missing optional columns
+            are fine. Extra vitals are stored as optional inputs and are not
+            silently substituted when absent.
           </p>
         </>
       ) : (

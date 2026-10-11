@@ -7,6 +7,7 @@ Run:  pytest test_security.py -v
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,7 +28,7 @@ def bearer(t):
     return {"Authorization": f"Bearer {t}"}
 
 
-ADMIN_GETS = ["/admin/rounds", "/admin/flags"]
+ADMIN_GETS = ["/admin/rounds", "/admin/flags", "/admin/retraining/requests"]
 
 
 @pytest.mark.parametrize("path", ADMIN_GETS)
@@ -65,6 +66,160 @@ def test_trigger_requires_super_admin():
 def svc_token(key, caller, aud, hid):
     import service_auth
     return {"X-Service-Key": service_auth.mint_service_token(key, caller=caller, audience=aud, hospital_id=hid)}
+
+
+def runner_token(hospital_id):
+    import service_auth
+    token = service_auth.mint_service_token(
+        auth.M3_M7_SIGNING_KEY, caller="module3",
+        audience="module7:retraining-runner", hospital_id=hospital_id,
+    )
+    return {"X-Service-Key": token}
+
+
+def test_retraining_is_off_by_default(monkeypatch):
+    monkeypatch.setenv("FEDHEAL_RETRAIN_MIN_ELIGIBLE_RECORDS", "0")
+    response = client.post("/admin/retraining/eligibility", json={"eligible_records": 100},
+                          headers=runner_token("retrain-off"))
+    assert response.status_code == 200
+    assert response.json() == {"status": "disabled", "request_id": None}
+
+
+def test_retraining_endpoints_reject_unscoped_or_wrong_audience_tokens():
+    import service_auth
+
+    assert client.post("/admin/retraining/eligibility", json={"eligible_records": 10}).status_code == 401
+    assert client.get("/admin/retraining/requests/next").status_code == 401
+    assert client.post("/admin/retraining/requests/complete",
+                       json={"request_id": "x", "status": "COMPLETED"}).status_code == 401
+
+    unscoped = service_auth.mint_service_token(
+        auth.M3_M7_SIGNING_KEY, caller="module3",
+        audience="module7:retraining-runner",
+    )
+    headers = {"X-Service-Key": unscoped}
+    assert client.get("/admin/retraining/requests/next", headers=headers).status_code == 403
+    assert client.post("/admin/retraining/eligibility",
+                       json={"eligible_records": 10}, headers=headers).status_code == 403
+
+    wrong_audience = svc_token(
+        auth.M3_M7_SIGNING_KEY, "module3", service_auth.AUD_MODEL_CANDIDATE, "retrain-wrong-aud",
+    )
+    assert client.get("/admin/retraining/requests/next", headers=wrong_audience).status_code == 403
+
+
+def test_retraining_requests_are_thresholded_idempotent_and_hospital_scoped(monkeypatch):
+    monkeypatch.setenv("FEDHEAL_RETRAIN_MIN_ELIGIBLE_RECORDS", "2")
+    h1, h2 = "retrain-h1", "retrain-h2"
+    token1, token2 = runner_token(h1), runner_token(h2)
+
+    baseline = client.post("/admin/retraining/eligibility", json={"eligible_records": 10}, headers=token1)
+    assert baseline.status_code == 200 and baseline.json()["status"] == "baseline_initialized"
+    below = client.post("/admin/retraining/eligibility", json={"eligible_records": 11}, headers=token1)
+    assert below.status_code == 200 and below.json()["status"] == "below_threshold"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        schedule_results = list(pool.map(
+            lambda count: client.post(
+                "/admin/retraining/eligibility", json={"eligible_records": count}, headers=token1,
+            ),
+            (12, 14),
+        ))
+    assert all(response.status_code == 200 for response in schedule_results)
+    assert sorted(response.json()["status"] for response in schedule_results) == ["already_queued", "queued"]
+    queued = next(response for response in schedule_results if response.json()["status"] == "queued")
+    duplicate = next(response for response in schedule_results if response.json()["status"] == "already_queued")
+    assert queued.json()["request_id"] == duplicate.json()["request_id"]
+
+    assert client.get("/admin/retraining/requests/next", headers=token2).json() is None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claims = list(pool.map(
+            lambda _: client.get("/admin/retraining/requests/next", headers=token1),
+            range(2),
+        ))
+    claimed = [response for response in claims if response.json() is not None]
+    assert len(claimed) == 1 and claimed[0].json()["status"] == "CLAIMED"
+    assert claimed[0].json()["baseline_records"] == 10
+    assert sum(response.json() is None for response in claims) == 1
+    more_during_run = client.post(
+        "/admin/retraining/eligibility", json={"eligible_records": 15}, headers=token1,
+    )
+    assert more_during_run.json()["status"] == "already_queued"
+    cross_tenant = client.post(
+        "/admin/retraining/requests/complete",
+        json={"request_id": queued.json()["request_id"], "status": "COMPLETED", "eligible_records": 15},
+        headers=token2,
+    )
+    assert cross_tenant.status_code == 404
+    no_candidate = client.post(
+        "/admin/retraining/requests/complete",
+        json={"request_id": queued.json()["request_id"], "status": "COMPLETED", "eligible_records": 15},
+        headers=token1,
+    )
+    assert no_candidate.status_code == 409
+
+    import service_auth
+    candidate = client.post(
+        "/admin/models/candidates",
+        json={
+            "model_name": "networked-vitals",
+            "condition": "heart_disease",
+            "training_round": 1,
+            "participating_hospitals": [h1],
+            "training_metadata": {"retraining_request_ids": [queued.json()["request_id"]]},
+            "metrics": {},
+            "artifact_hash": "a" * 64,
+        },
+        headers=svc_token(auth.M3_M7_SIGNING_KEY, "module3", service_auth.AUD_MODEL_CANDIDATE, "*"),
+    )
+    assert candidate.status_code == 201
+    assert candidate.json()["deployment_status"] == "CANDIDATE"
+    assert candidate.json()["validation_status"] == "PENDING"
+    own_candidate = client.get(
+        f"/admin/retraining/requests/{queued.json()['request_id']}/candidate",
+        headers=token1,
+    )
+    assert own_candidate.status_code == 200
+    assert own_candidate.json()["registered"] is True
+    assert own_candidate.json()["candidate_id"] == candidate.json()["id"]
+    cross_tenant_candidate = client.get(
+        f"/admin/retraining/requests/{queued.json()['request_id']}/candidate",
+        headers=token2,
+    )
+    assert cross_tenant_candidate.status_code == 404
+
+    completed = client.post(
+        "/admin/retraining/requests/complete",
+        json={"request_id": queued.json()["request_id"], "status": "COMPLETED", "eligible_records": 15},
+        headers=token1,
+    )
+    assert completed.status_code == 200 and completed.json()["status"] == "COMPLETED"
+    after_completion = client.post(
+        "/admin/retraining/eligibility", json={"eligible_records": 16}, headers=token1,
+    )
+    assert after_completion.json()["status"] == "below_threshold"
+    next_round = client.post(
+        "/admin/retraining/eligibility", json={"eligible_records": 17}, headers=token1,
+    )
+    assert next_round.json()["status"] == "queued"
+    assert next_round.json()["request_id"] != queued.json()["request_id"]
+
+
+def test_retraining_candidate_status_is_hospital_scoped_and_false_until_candidate_registered(monkeypatch):
+    monkeypatch.setenv("FEDHEAL_RETRAIN_MIN_ELIGIBLE_RECORDS", "1")
+    hospital_id = "candidate-status-hospital"
+    token = runner_token(hospital_id)
+    client.post("/admin/retraining/eligibility", json={"eligible_records": 1}, headers=token)
+    queued = client.post("/admin/retraining/eligibility", json={"eligible_records": 2}, headers=token).json()
+    request_id = queued["request_id"]
+    claimed = client.get("/admin/retraining/requests/next", headers=token)
+    assert claimed.status_code == 200 and claimed.json()["id"] == request_id
+
+    before = client.get(f"/admin/retraining/requests/{request_id}/candidate", headers=token)
+    assert before.status_code == 200 and before.json()["registered"] is False
+    assert client.get(
+        f"/admin/retraining/requests/{request_id}/candidate",
+        headers=runner_token("different-hospital"),
+    ).status_code == 404
 
 
 class TestServiceKeys:

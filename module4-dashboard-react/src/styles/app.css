@@ -439,8 +439,35 @@
   color: var(--ink-faint);
 }
 
-.rail__trigger {
-  flex-shrink: 0;
+.rail__retraining {
+  flex: 0 1 260px;
+  min-width: 200px;
+  max-height: 92px;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  padding-left: var(--space-3);
+}
+.rail__retraining .eyebrow {
+  margin-bottom: 4px;
+}
+.rail__retraining-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+}
+.rail__retraining-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-dim);
+}
+.rail__candidate {
+  margin: 4px 0 0;
+  color: var(--ink-dim);
+  font-size: 10px;
 }
 
 /* ================= detail drawer ================= */

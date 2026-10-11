@@ -9,28 +9,35 @@ x-common: &common
   restart: unless-stopped
   env_file: .env
 
-services:
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: fedheal
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-      POSTGRES_DB: fedheal
-    volumes: [dbdata:/var/lib/postgresql/data]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U fedheal"]
-      interval: 5s
-      retries: 10
+# Module 1 and Module 7 talk to the Firestore emulator below. Both use the same project; their
+# collection names don't collide (Module 7 may be given its own database: FEDHEAL_ADMIN_FIRESTORE_DATABASE).
+x-firestore-env: &firestore-env
+  FEDHEAL_DB_BACKEND: firestore
+  FEDHEAL_FIREBASE_PROJECT_ID: ${FEDHEAL_FIREBASE_PROJECT_ID:-demo-fedheal}
+  FIRESTORE_EMULATOR_HOST: firestore:8080
 
-  auth:            # Module 1 (runs `alembic upgrade head` on start)
+services:
+  firestore:       # Firebase Firestore EMULATOR for local runs (in-memory: data is lost when it stops).
+    # Staging/production use real Firestore instead: drop this service, remove FIRESTORE_EMULATOR_HOST
+    # below and provide GOOGLE_APPLICATION_CREDENTIALS (see docs/FIRESTORE_MIGRATION.md).
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    restart: unless-stopped
+    command: ["gcloud", "emulators", "firestore", "start", "--host-port=0.0.0.0:8080"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.create_connection(('localhost',8080),timeout=3); s.close()"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  auth:            # Module 1
     <<: *common
     build: {context: ., dockerfile: module1-auth/Dockerfile}
     environment:
-      FEDHEAL_DATABASE_URL: postgresql://fedheal:${POSTGRES_PASSWORD}@db:5432/fedheal
+      <<: *firestore-env
       FEDHEAL_VALIDATION_API_URL: http://validation:8002
     depends_on:
-      db: {condition: service_healthy}
+      firestore: {condition: service_healthy}
       validation: {condition: service_healthy}
     ports: ["8001:8001"]
     healthcheck:
@@ -57,11 +64,11 @@ services:
     <<: *common
     build: {context: ., dockerfile: module7-admin/Dockerfile}
     environment:
-      FEDHEAL_DATABASE_URL: postgresql://fedheal:${POSTGRES_PASSWORD}@db:5432/fedheal
+      <<: *firestore-env
       FEDMED_AUTH_API_URL: http://auth:8001
     depends_on:
-      db: {condition: service_healthy}
-      auth: {condition: service_healthy}     # shares the database; Module 1's migrations run first
+      firestore: {condition: service_healthy}
+      auth: {condition: service_healthy}
     ports: ["8005:8005"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health', timeout=3)"]
@@ -87,11 +94,19 @@ services:
       retries: 20
       start_period: 15s
 
-  fl-server:       # Module 3 Flower server; plaintext gRPC, LAN/localhost only (no TLS yet)
+  fl-server:       # Module 3 Flower server; Compose uses plaintext by default (TLS options exist in M3)
     <<: *common
     profiles: [federation]
     build: {context: ., dockerfile: module3-fedlearning/Dockerfile}
+    depends_on:
+      admin: {condition: service_healthy}
     ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('localhost',8080),timeout=3); s.close()"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
 
   dashboard:       # Module 4; VITE_* URLs are baked in at build time
     build:
@@ -103,6 +118,3 @@ services:
         VITE_SYNTHESIS_API_BASE: ${PUBLIC_SYNTHESIS_URL:-http://localhost:8006}
     restart: unless-stopped
     ports: ["5173:80"]
-
-volumes:
-  dbdata:

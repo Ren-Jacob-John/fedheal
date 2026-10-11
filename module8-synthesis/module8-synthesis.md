@@ -115,20 +115,48 @@ vitals→SHAP→synthesis story demoable"):
 - `GET /health` — `{"status": "ok", "service": "module8-synthesis"}`.
 - `POST /synthesize/heart_disease` — **retired (410)**. It took 8 hand-typed
   numbers in a legacy feature space that matched no stored data.
+- `POST /cases/{case_id}/analyze` — builds a hospital-scoped review packet.
+  Its `reasoning` section separates model-used vitals and feature contributions
+  from context-only history, symptoms, and admission reason, and reports missing
+  inputs without echoing their free text. `suggested_considerations` contains
+  only exact condition matches from `considerations.py` (ruleset version
+  `1.0.0`); every rule is tagged `unvalidated - for clinician review` and carries
+  source/provenance. No match returns `no suggestion available`. The response
+  always sets both clinician-review-required flags to `true`.
+  Successful packets are persisted by forwarding only structured model
+  metadata, feature identifiers/contributions, and consideration-rule
+  provenance to Module 1 with the caller's same JWT; raw history, symptoms,
+  admission text, and clinician notes are not copied. The response includes
+  the resulting `analysis_id`; persistence failures are returned explicitly
+  rather than masquerading as a saved analysis.
+- `POST /cases/{case_id}/scans/{scan_id}/analyze` — hospital-scoped status
+  contract only. The route verifies scan membership through Module 1 using the
+  caller's JWT, then returns `analysis_unavailable` with the explicit message
+  `analysis unavailable: no validated imaging model`, `model_status:
+  UNAVAILABLE`, null finding/confidence/heatmap reference/model version, and
+  `requires_clinician_review: true`. It does not fetch or transmit scan bytes;
+  cross-hospital or unlinked scans are refused.
+
+Module 1 exposes hospital-scoped `POST` and `GET
+/cases/{case_id}/analyses` routes for append-only history. Clinician review
+records may reference an analysis, after same-case/same-hospital ownership is
+checked. The dashboard shows saved analysis versions/statuses and links the
+current report to a review.
 
 Requires a valid FedHeal session (any logged-in hospital user, not just
 super_admin) via the same JWT/cookie Module 1 issues; see `auth.py`.
 
-**The model is a labelled demo fallback, not a federated model.** Module 3
-does not export a global model, so there is nothing to load. `model_provider.py`
-fits the vitals specialist on the vendored public UCI Cleveland data (in
-Module 1's schema; only 3 of the 8 features carry real values there) and
-reports it as `training_status="demo_fit"`, `is_fallback=true`,
-`federated=false`. It is on by default in development/test and must be
-enabled explicitly (`FEDHEAL_ALLOW_DEMO_MODEL=true`) elsewhere; when off the
-endpoint answers 503. (The earlier fit on `numpy.random.normal` noise at
-import is gone.) Integrating Module 3 later is a change confined to
-`model_provider.py`.
+Module 8 first serves the explicitly promoted Module 7 registry model when
+one is available. If none is promoted, `model_provider.py` can fit a vitals
+specialist on the vendored public UCI Cleveland data (in Module 1's schema;
+only 3 of the 8 features carry real values there) and reports it as
+`training_status="demo_fit"`, `is_fallback=true`, `federated=false`. This
+fallback requires `FEDHEAL_ALLOW_DEMO_MODEL=true`; otherwise the endpoint
+answers 503. It is labelled NON-CLINICAL in the API/UI. (The earlier fit on
+`numpy.random.normal` noise at import is gone.) Module 3 networked
+aggregates can now register as pending candidates only with complete
+provenance; they still require registry validation and explicit promotion
+before Module 8 serves them.
 
 Only conditions whose specialists are all `vitals` can be driven from a
 Module 1 record (`heart_disease`); the rest need imaging/genomic/CBC inputs
@@ -142,7 +170,11 @@ stub/fallback status of their specialists.
   not folded into `urgent_review_flags`~~ — **closed in Sprint B**: a
   finding's own urgent flag now appends directly to
   `urgent_review_flags`, independent of whether a fusion step ran.
-- No automated tests yet — given this module's entire purpose is "never
-  imply more certainty than the underlying models actually have,"
-  it's a strong candidate for the most thorough test coverage in the
-  project (see `DEVELOPMENT_PLAN.md`, section 4.1).
+- Automated tests cover the case-analysis packet, persistence handoff,
+  clinician-review flags, rule provenance, no-dosing regressions, scan
+  endpoint tenancy, and model status. The latest full run had 66 passed and
+  one failure: the pre-existing SHAP-availability expectation, also present
+  in the pristine archive. The combined imaging, endpoint, and case-analysis
+  focused selectors passed 25 tests. The earlier two chest-X-ray stub-status
+  expectations no longer fail in the current tree. These are environment/
+  status gaps, not evidence of clinical model capability.

@@ -1,12 +1,52 @@
-# FedHeal — Implementation Status (baseline audit)
+# FedHeal — Implementation Status
 
-Audit date: 2026-10-06. Scope: inspection only. **No application code was changed.**
-Everything below was read from the repository or observed by running it; items I
-could not verify are marked **UNVERIFIED**. No clinical metrics are claimed anywhere
-in this document.
+Updated: 2026-10-11. This is the current task status; the 2026-10-06 audit
+below is retained as a historical baseline and is not authoritative where it
+conflicts with the current status.
+
+## Current status
+
+| Slice | Status | Current evidence / remaining gap |
+|---|---|---|
+| A — analysis reasoning and suggestions | PARTIAL | Analysis packets separate model feature contributions from context, report missing/unused inputs, require clinician review, and use a versioned rule file with provenance. Current rule is an operational review reminder, not a validated clinical next-step rule; unmatched conditions say “no suggestion available.” |
+| B — optional vitals and context inputs | PARTIAL | Temperature, SpO2, and respiratory rate are nullable through Firestore, validation, upload/UI, and explicit feature-schema plumbing. V2 model training remains gated; history, symptoms, and admission reason remain context-only. Firestore is used instead of Alembic, so no SQL migration was added. |
+| C — persisted analyses | IMPLEMENTED | Append-only, hospital-scoped analysis history; Module 8 forwards structured metadata only; reviews can link to a same-case analysis; dashboard shows history. New route tenancy, append-only, and audit tests pass. |
+| D — automatic gated retraining | PARTIAL | M7 queues one hospital-scoped request after N new eligible records (threshold disabled by default); M3 watch mode polls/claims requests. The queue-triggered Flower flow passed across separate service processes and throwaway stores; Docker-container execution remains unverified. A provenance-complete final aggregate registers as CANDIDATE and links to its requests; incomplete provenance prevents registration/completion. Validation and explicit super-admin promotion remain separate. No cron scheduler or clinician-confirmed training-label pathway is implemented. |
+| E — runnable demo | PARTIAL | Compose health checks/start ordering are present and its YAML parses; Module 3 is in CI. The real-service doctor workflow passed 7 integration tests. A CI Playwright job is configured and the spec is discoverable; Docker/Compose and the browser job were not executed here, so no full Compose demo is claimed. |
+| F — scan analysis | STATUS-ONLY STUB / UNAVAILABLE | The authenticated, hospital-scoped scan route verifies case/scan membership and returns unavailable with null finding, confidence, heatmap and model version. It does not retrieve image bytes; no imaging finding is produced. |
+| G — update privacy | PARTIAL | Optional client clipping/noise and server-authenticated Flower TLS options exist. Defaults are off; the integration test's networked Flower transport is plaintext. No privacy accountant/epsilon, mTLS, or secure aggregation exists. |
+
+The active data layer is Firestore document storage (Modules 1 and 7), not
+SQLAlchemy/Postgres. Collection creation is implicit and indexed in
+`firestore.indexes.json`; there is no active Alembic migration layer for these
+services. Do not use the historical SQL schema table below as the current
+storage description.
+
+Baseline and validation notes: the pristine root `pytest -q` collection had
+1 skipped test and 6 collection errors; pristine Module 8 had 48 passed and
+3 failed. Python 3.14.6 is the only installed Python here (CI pins 3.12).
+Recent runs: M1 analysis persistence 7 passed; M2 security 46 passed; M3
+current full suite 39 passed; M7 full suite 63 passed after the malformed
+NaN case was changed to send raw JSON to the API; M8 scan endpoint tests 7
+passed and combined imaging/endpoint/case-analysis selectors 25 passed;
+the real-service doctor workflow 7 passed; the queue-triggered two-hospital
+candidate/promotion/inference integration 7 passed. M8's latest full suite
+was 66 passed / 1 failed (the pre-existing SHAP
+availability expectation); M6's focused suite had 11 passed / 2 SHAP-runtime
+failures. Dashboard production build passed (28 modules); Playwright lists
+one spec but browser execution is unverified. A local real-network Flower
+comparison printed PASS with the final accuracy within tolerance, but its
+script exited nonzero during Windows temporary-directory cleanup because a
+Module 1 log was still open. Docker and Compose were not run.
 
 Legend: **IMPLEMENTED** (works, tested) · **PARTIAL** (works with gaps) · **STUB**
 (placeholder that labels itself as such) · **BROKEN** · **MISSING**.
+
+## Historical baseline audit (2026-10-06)
+
+The following sections describe the archive before the current implementation
+work. They are kept for the original baseline evidence only; current architecture
+and status are summarized above.
 
 ---
 

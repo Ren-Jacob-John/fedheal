@@ -3,7 +3,11 @@
 module1-auth/.env
 module7-admin/.env
 
-# Local SQLite fallback DBs (used only when Supabase isn't configured)
+# Local development document stores (FEDHEAL_DB_BACKEND=local) and their lock/temp files
+*_store.json
+*_store.json.lock
+.store-*.tmp
+# Legacy SQLite files from before the Firestore migration
 *.db
 
 # Python

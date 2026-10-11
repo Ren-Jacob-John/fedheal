@@ -22,8 +22,6 @@ from fastapi import FastAPI, Depends, Header, HTTPException, Request, Response, 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from sqlalchemy import func
-from sqlalchemy.orm import Session
 
 import auth
 import config
@@ -32,17 +30,12 @@ import models
 import service_auth
 from audit import audit_event, hash_identifier
 from database import get_db
+from repo import DuplicateError, Repo
 from docs_theme import mount_custom_docs
 
-# Sprint A introduced Alembic (see migrations/ and module1-auth.md) but kept
-# Base.metadata.create_all() running alongside it as a transitional safety
-# net. Sprint B retires create_all entirely: `alembic upgrade head` is now
-# the only way tables come into existence, in every environment including
-# local dev. Running both permanently would be worse than either alone —
-# create_all would silently create any table a forgotten migration missed,
-# and the schema Alembic thinks is deployed would drift from the one
-# actually deployed. See module1-auth.md's "Database schema" section for
-# the one-time `alembic stamp` step existing databases need.
+# Storage is Firestore (see database.py / docstore.py / repo.py). There are no
+# schema migrations: collections appear on first write, and the composite
+# indexes the ordered queries need are declared in firestore.indexes.json.
 
 app = FastAPI(title="FedHeal Auth Service", version="0.1.0", docs_url=None)
 mount_custom_docs(app, accent="#5b7cfa", accent_soft="#dfe7ff")  # blue — Module 1
@@ -234,6 +227,9 @@ class StoredVitalsOut(BaseModel):
     systolic_bp: Optional[float]
     diastolic_bp: Optional[float]
     heart_rate_bpm: Optional[float]
+    temperature_c: Optional[float] = None
+    spo2_percent: Optional[float] = None
+    respiratory_rate_bpm: Optional[float] = None
     medication_count: int
     medication_mg_total: float
     label: Optional[int]
@@ -249,7 +245,7 @@ class StoredVitalsOut(BaseModel):
 def get_current_user(
     request: Request,
     token: str | None = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
 ) -> models.User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -268,7 +264,7 @@ def get_current_user(
         audit_event("authn.failure", "denied", request=request, reason=f"{why}_token")
         raise credentials_exception
     user_id = payload.get("sub")
-    user = db.query(models.User).filter(models.User.id == user_id).first()
+    user = db.get_user(user_id)
     if user is None:
         audit_event("authn.failure", "denied", request=request, reason="unknown_user")
         raise credentials_exception
@@ -302,18 +298,16 @@ def health():
 def create_hospital(
     payload: HospitalCreate,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
     admin: models.User = Depends(require_role(models.Role.SUPER_ADMIN)),
 ):
-    existing = db.query(models.Hospital).filter(models.Hospital.name == payload.name).first()
-    if existing:
+    hospital = models.Hospital(name=payload.name, requires_label=payload.requires_label)
+    try:
+        db.create_hospital(hospital)   # name uniqueness is enforced atomically by the repo
+    except DuplicateError:
         audit_event("hospital.create", "failure", request=request, actor_user_id=admin.id,
                     actor_role=admin.role, reason="duplicate_name")
         raise HTTPException(status_code=400, detail="Hospital already exists")
-    hospital = models.Hospital(name=payload.name, requires_label=payload.requires_label)
-    db.add(hospital)
-    db.commit()
-    db.refresh(hospital)
     audit_event("hospital.create", "success", request=request, actor_user_id=admin.id,
                 actor_role=admin.role, target_hospital_id=hospital.id,
                 requires_label=hospital.requires_label)
@@ -333,7 +327,7 @@ def get_directory_principal(
     request: Request,
     x_service_key: str | None = Header(default=None),
     token: str | None = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
 ) -> DirectoryPrincipal:
     """
     GET /hospitals accepts EITHER a logged-in user (same JWT as everywhere
@@ -363,7 +357,7 @@ def get_directory_principal(
 @app.get("/hospitals", response_model=list[HospitalOut])
 def list_hospitals(
     request: Request,
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
     principal: DirectoryPrincipal = Depends(get_directory_principal),
 ):
     """
@@ -373,10 +367,7 @@ def list_hospitals(
     hospital, and only the operator's directory-audience token sees all.
     Nothing here returns vitals or user data.
     """
-    query = db.query(models.Hospital)
-    if principal.scope is not None:
-        query = query.filter(models.Hospital.id == principal.scope)
-    return query.all()
+    return db.list_hospitals(only_id=principal.scope)
 
 
 # Added for Module 7 (Admin/Platform): the operator's "activate/deactivate
@@ -387,10 +378,10 @@ def set_hospital_status(
     hospital_id: str,
     payload: HospitalStatusUpdate,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
     _admin: models.User = Depends(require_role(models.Role.SUPER_ADMIN)),
 ):
-    hospital = db.query(models.Hospital).filter(models.Hospital.id == hospital_id).first()
+    hospital = db.get_hospital(hospital_id)
     if not hospital:
         raise HTTPException(status_code=404, detail="Hospital not found")
     if payload.is_active is None and payload.requires_label is None:
@@ -402,8 +393,7 @@ def set_hospital_status(
         hospital.is_active = payload.is_active
     if payload.requires_label is not None:
         hospital.requires_label = payload.requires_label
-    db.commit()
-    db.refresh(hospital)
+    db.save_hospital(hospital)
     audit_event("hospital.update", "success", request=request, actor_user_id=_admin.id,
                 actor_role=_admin.role, target_hospital_id=hospital.id,
                 is_active=hospital.is_active, requires_label=hospital.requires_label)
@@ -422,15 +412,15 @@ if PUBLIC_REGISTRATION_ENABLED:
 
 
 @app.post("/register", response_model=UserOut)
-def register(payload: UserRegister, request: Request, db: Session = Depends(get_db)):
+def register(payload: UserRegister, request: Request, db: Repo = Depends(get_db)):
     if not PUBLIC_REGISTRATION_ENABLED:
         audit_event("register", "denied", request=request, reason="public_registration_disabled")
         raise HTTPException(status_code=403,
                             detail="Public registration is disabled. Ask your hospital administrator to create your account.")
-    if db.query(models.User).filter(models.User.email == payload.email).first():
+    if db.get_user_by_email(payload.email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    hospital = db.query(models.Hospital).filter(models.Hospital.id == payload.hospital_id).first()
+    hospital = db.get_hospital(payload.hospital_id)
     if not hospital:
         raise HTTPException(status_code=404, detail="Hospital not found")
 
@@ -444,9 +434,10 @@ def register(payload: UserRegister, request: Request, db: Session = Depends(get_
         role=models.Role.CLINICIAN,
         hospital_id=payload.hospital_id,
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    try:
+        db.create_user(user)
+    except DuplicateError:
+        raise HTTPException(status_code=400, detail="Email already registered")
     return user
 
 
@@ -462,7 +453,7 @@ def register(payload: UserRegister, request: Request, db: Session = Depends(get_
 def create_admin_user(
     payload: AdminUserCreate,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
     _admin: models.User = Depends(require_role(models.Role.SUPER_ADMIN)),
 ):
     if payload.role not in (models.Role.HOSPITAL_ADMIN, models.Role.SUPER_ADMIN):
@@ -471,14 +462,14 @@ def create_admin_user(
             detail="This endpoint creates administrators only; hospital admins create doctors via POST /hospital/doctors",
         )
 
-    if db.query(models.User).filter(models.User.email == payload.email).first():
+    if db.get_user_by_email(payload.email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hospital_id = payload.hospital_id
     if payload.role == models.Role.HOSPITAL_ADMIN:
         if not hospital_id:
             raise HTTPException(status_code=400, detail="hospital_id is required for a hospital_admin")
-        hospital = db.query(models.Hospital).filter(models.Hospital.id == hospital_id).first()
+        hospital = db.get_hospital(hospital_id)
         if not hospital:
             raise HTTPException(status_code=404, detail="Hospital not found")
     # SUPER_ADMIN mirrors models.User.hospital_id: nullable, since a
@@ -491,9 +482,10 @@ def create_admin_user(
         role=payload.role,
         hospital_id=hospital_id,
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    try:
+        db.create_user(user)
+    except DuplicateError:
+        raise HTTPException(status_code=400, detail="Email already registered")
     audit_event("admin.user_create", "success", request=request, actor_user_id=_admin.id,
                 actor_role=_admin.role, target_user_id=user.id, target_role=user.role,
                 target_hospital_id=user.hospital_id)
@@ -505,7 +497,7 @@ def login(
     request: Request,
     response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
 ):
     client_ip = request.client.host if request.client else "unknown"
     try:
@@ -515,7 +507,7 @@ def login(
                     username_hash=hash_identifier(form_data.username))
         raise
 
-    user = db.query(models.User).filter(models.User.email == form_data.username).first()
+    user = db.get_user_by_email(form_data.username)
     if user is not None and user.is_active is False:
         # Same response as a wrong password: don't reveal that the account exists.
         audit_event("login", "failure", request=request, reason="account_disabled",
@@ -563,7 +555,7 @@ def read_me(current_user: models.User = Depends(get_current_user)):
 # Module 2, not reimplementing its rules) -> passed/flagged records land
 # in this hospital's own VitalsRecord rows -> Module 3 can train on them.
 
-def _require_upload_hospital(db: Session, current_user: models.User) -> models.Hospital:
+def _require_upload_hospital(db: Repo, current_user: models.User) -> models.Hospital:
     """
     Every upload path needs the caller's hospital ROW, not just its id —
     requires_label lives there. Resolved from the JWT's hospital_id like
@@ -571,11 +563,7 @@ def _require_upload_hospital(db: Session, current_user: models.User) -> models.H
     """
     if not current_user.hospital_id:
         raise HTTPException(status_code=400, detail="Only hospital-scoped users can upload vitals")
-    hospital = (
-        db.query(models.Hospital)
-        .filter(models.Hospital.id == current_user.hospital_id)
-        .first()
-    )
+    hospital = db.get_hospital(current_user.hospital_id)
     if not hospital:
         raise HTTPException(status_code=404, detail="Hospital not found")
     return hospital
@@ -594,7 +582,7 @@ def _label_source(label) -> str:
 async def upload_vitals(
     payload: VitalsUploadRequest,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     hospital = _require_upload_hospital(db, current_user)
@@ -624,6 +612,7 @@ async def upload_vitals(
     # store for each "passed"/"flagged" result.
     stored = 0
     stored_labeled = 0
+    to_store: list[models.VitalsRecord] = []
     for raw, result in zip(payload.records, validation["results"]):
         if result["status"] not in ("passed", "flagged"):
             continue
@@ -636,17 +625,20 @@ async def upload_vitals(
             systolic_bp=raw.get("systolic_bp"),
             diastolic_bp=raw.get("diastolic_bp"),
             heart_rate_bpm=raw.get("heart_rate_bpm"),
+            temperature_c=raw.get("temperature_c"),
+            spo2_percent=raw.get("spo2_percent"),
+            respiratory_rate_bpm=raw.get("respiratory_rate_bpm"),
             medication_count=raw.get("medication_count", 0),
             medication_mg_total=raw.get("medication_mg_total", 0),
             label=raw.get("label"),
             label_source=_label_source(raw.get("label")),
             validation_status=result["status"],
         )
-        db.add(record)
+        to_store.append(record)
         stored += 1
         if record.label is not None:
             stored_labeled += 1
-    db.commit()
+    db.add_vitals_bulk(to_store)
 
     audit_event("vitals.upload", "success", request=request, actor_user_id=current_user.id,
                 actor_role=current_user.role, hospital_id=current_user.hospital_id,
@@ -674,7 +666,7 @@ async def upload_vitals(
 async def upload_vitals_csv(
     request: Request,
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     hospital = _require_upload_hospital(db, current_user)
@@ -721,6 +713,7 @@ async def upload_vitals_csv(
 
     stored = 0
     stored_labeled = 0
+    to_store: list[models.VitalsRecord] = []
     for raw, result in zip(raw_rows, validation["results"]):
         if result["status"] not in ("passed", "flagged"):
             continue
@@ -740,17 +733,20 @@ async def upload_vitals_csv(
             systolic_bp=_num(raw.get("systolic_bp"), float),
             diastolic_bp=_num(raw.get("diastolic_bp"), float),
             heart_rate_bpm=_num(raw.get("heart_rate_bpm"), float),
+            temperature_c=_num(raw.get("temperature_c"), float),
+            spo2_percent=_num(raw.get("spo2_percent"), float),
+            respiratory_rate_bpm=_num(raw.get("respiratory_rate_bpm"), float),
             medication_count=int(_num(raw.get("medication_count"), float) or 0),
             medication_mg_total=_num(raw.get("medication_mg_total"), float) or 0,
             label=_csv_label,
             label_source=_label_source(_csv_label),
             validation_status=result["status"],
         )
-        db.add(record)
+        to_store.append(record)
         stored += 1
         if _csv_label is not None:
             stored_labeled += 1
-    db.commit()
+    db.add_vitals_bulk(to_store)
 
     audit_event("vitals.upload_csv", "success", request=request, actor_user_id=current_user.id,
                 actor_role=current_user.role, hospital_id=current_user.hospital_id,
@@ -786,19 +782,12 @@ class ReviewDecision(BaseModel):
 
 @app.get("/vitals/flagged", response_model=list[StoredVitalsOut])
 def list_flagged_vitals(
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     if not current_user.hospital_id:
         raise HTTPException(status_code=400, detail="Only hospital-scoped users can review vitals")
-    return (
-        db.query(models.VitalsRecord)
-        .filter(
-            models.VitalsRecord.hospital_id == current_user.hospital_id,
-            models.VitalsRecord.validation_status == "flagged",
-        )
-        .all()
-    )
+    return db.list_flagged(current_user.hospital_id)
 
 
 @app.post("/vitals/{record_id}/review")
@@ -806,12 +795,12 @@ def review_flagged_vitals(
     record_id: str,
     payload: ReviewDecision,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
     current_user: models.User = Depends(
         require_role(models.Role.HOSPITAL_ADMIN, models.Role.SUPER_ADMIN)
     ),
 ):
-    record = db.query(models.VitalsRecord).filter(models.VitalsRecord.id == record_id).first()
+    record = db.get_vitals(record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     if current_user.role != models.Role.SUPER_ADMIN and record.hospital_id != current_user.hospital_id:
@@ -824,15 +813,14 @@ def review_flagged_vitals(
 
     if payload.decision == "approve":
         record.validation_status = "passed"
-        db.commit()
+        db.save_vitals(record)
         audit_event("vitals.review", "success", request=request, actor_user_id=current_user.id,
                     actor_role=current_user.role, hospital_id=record.hospital_id,
                     record_id=record_id, decision="approve")
         return {"id": record_id, "validation_status": "passed"}
     # payload.decision == "reject" (the Literal type guarantees nothing else gets here)
     hospital_of_record = record.hospital_id
-    db.delete(record)
-    db.commit()
+    db.delete_vitals(record_id)
     audit_event("vitals.review", "success", request=request, actor_user_id=current_user.id,
                 actor_role=current_user.role, hospital_id=hospital_of_record,
                 record_id=record_id, decision="reject")
@@ -857,7 +845,7 @@ def export_vitals(
     request: Request,
     include_flagged: bool = False,
     labeled_only: bool = True,
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
     claims: dict = Depends(auth.require_export_credential),
 ):
     """
@@ -880,12 +868,7 @@ def export_vitals(
                     token_hospital_id=token_hospital)
         raise HTTPException(status_code=403, detail="Credential is not authorized for this hospital")
 
-    query = db.query(models.VitalsRecord).filter(models.VitalsRecord.hospital_id == token_hospital)
-    if not include_flagged:
-        query = query.filter(models.VitalsRecord.validation_status == "passed")
-    if labeled_only:
-        query = query.filter(models.VitalsRecord.label.isnot(None))
-    rows = query.all()
+    rows = db.export_vitals(token_hospital, include_flagged=include_flagged, labeled_only=labeled_only)
     audit_event("vitals.export", "success", request=request, actor_service=claims.get("sub"),
                 hospital_id=token_hospital, count=len(rows))
     return rows
@@ -900,7 +883,7 @@ def list_vitals(
     request: Request,
     validation_status: Optional[Literal["passed", "flagged"]] = None,
     limit: int = 100,
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     """The caller's own hospital's stored records (ordered by patient_ref,
@@ -908,11 +891,8 @@ def list_vitals(
     JWT, never from a parameter."""
     if not current_user.hospital_id:
         raise HTTPException(status_code=400, detail="Only hospital-scoped users can list vitals")
-    query = db.query(models.VitalsRecord).filter(models.VitalsRecord.hospital_id == current_user.hospital_id)
-    if validation_status:
-        query = query.filter(models.VitalsRecord.validation_status == validation_status)
     limit = max(1, min(limit, 500))
-    rows = query.order_by(models.VitalsRecord.patient_ref).limit(limit).all()
+    rows = db.list_vitals(current_user.hospital_id, validation_status, limit)
     audit_event("vitals.list", "success", request=request, actor_user_id=current_user.id,
                 actor_role=current_user.role, hospital_id=current_user.hospital_id, count=len(rows))
     return rows
@@ -922,13 +902,13 @@ def list_vitals(
 def get_vitals_record(
     record_id: str,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     """One stored record. 404 if it doesn't exist; 403 (and an audit event)
     if it belongs to another hospital. Module 8 calls this with the user's
     own JWT — it holds no service credential for record access."""
-    record = db.query(models.VitalsRecord).filter(models.VitalsRecord.id == record_id).first()
+    record = db.get_vitals(record_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Record not found")
     if current_user.role != models.Role.SUPER_ADMIN and record.hospital_id != current_user.hospital_id:
@@ -959,33 +939,16 @@ app.include_router(_cases.build_router(
 # validated data each hospital has waiting, and whether that's enough to
 # be worth a round.
 
-def _hospital_training_status(db: Session, hospital_id: str) -> dict:
-    count = (
-        db.query(func.count(models.VitalsRecord.id))
-        .filter(models.VitalsRecord.hospital_id == hospital_id)
-        .scalar()
-        or 0
-    )
+def _hospital_training_status(db: Repo, hospital_id: str) -> dict:
+    count = db.count_vitals(hospital_id)
     # Sprint A: "how many records" stopped being the useful number once
     # unlabeled records were excluded from training by default. A hospital
     # can sit on 500 records and still be untrainable if none carry a real
     # outcome, and the old status field would have cheerfully reported
     # "ready_for_training" the whole time.
-    labeled_count = (
-        db.query(func.count(models.VitalsRecord.id))
-        .filter(
-            models.VitalsRecord.hospital_id == hospital_id,
-            models.VitalsRecord.label.isnot(None),
-        )
-        .scalar()
-        or 0
-    )
-    last_upload = (
-        db.query(func.max(models.VitalsRecord.uploaded_at))
-        .filter(models.VitalsRecord.hospital_id == hospital_id)
-        .scalar()
-    )
-    hospital = db.query(models.Hospital).filter(models.Hospital.id == hospital_id).first()
+    labeled_count = db.count_vitals(hospital_id, labeled_only=True)
+    last_upload = db.last_upload(hospital_id)
+    hospital = db.get_hospital(hospital_id)
 
     if labeled_count >= MIN_RECORDS_FOR_TRAINING:
         status_value = "ready_for_training"
@@ -1010,9 +973,9 @@ def _hospital_training_status(db: Session, hospital_id: str) -> dict:
 @app.get("/training-status")
 def get_training_status(
     current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Repo = Depends(get_db),
 ):
     if current_user.role == models.Role.SUPER_ADMIN:
-        hospital_ids = [h.id for h in db.query(models.Hospital).all()]
+        hospital_ids = [h.id for h in db.list_hospitals()]
         return {hid: _hospital_training_status(db, hid) for hid in hospital_ids}
     return _hospital_training_status(db, current_user.hospital_id)

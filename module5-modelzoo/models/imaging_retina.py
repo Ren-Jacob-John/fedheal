@@ -22,6 +22,8 @@ class ResNet50RetinaModel(SpecialistModel):
     name = "resnet50-retina-v1"
     modality = "retina"
     task = "classification"
+    model_version = "untrained"
+    training_status = "untrained"
 
     def __init__(self, num_classes: int = len(CLASS_NAMES), freeze_backbone: bool = True):
         if not TORCH_AVAILABLE:
@@ -40,20 +42,7 @@ class ResNet50RetinaModel(SpecialistModel):
         self.backbone.eval()
 
     def is_available(self) -> bool:
-        return TORCH_AVAILABLE
+        return False
 
     def predict(self, case: dict) -> PredictionResult:
-        image = case["image"]  # (1, 3, 224, 224), preprocessed upstream
-        with torch.no_grad():
-            logits = self.backbone(image)
-            probs = torch.softmax(logits, dim=1)[0]
-            pred_idx = int(torch.argmax(probs).item())
-
-        return PredictionResult(
-            model_name=self.name,
-            modality=self.modality,
-            task=self.task,
-            label=CLASS_NAMES[pred_idx],
-            confidence=float(probs[pred_idx].item()),
-            raw_output=probs.tolist(),
-        )
+        raise RuntimeError("analysis unavailable: no validated imaging model")

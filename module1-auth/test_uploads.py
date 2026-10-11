@@ -96,6 +96,21 @@ def test_small_json_upload_succeeds(clinician):
     assert resp.json()["stored"] == 3 and resp.json()["total"] == 3
 
 
+def test_json_upload_stores_optional_vitals_without_imputation(clinician):
+    record = {**GOOD, "temperature_c": 37.1, "spo2_percent": 97, "respiratory_rate_bpm": 17}
+    response = post_json(clinician["headers"], [record])
+    assert response.status_code == 200
+    stored = client.get("/vitals", headers=clinician["headers"]).json()[0]
+    assert (stored["temperature_c"], stored["spo2_percent"], stored["respiratory_rate_bpm"]) == (37.1, 97, 17)
+
+
+def test_json_upload_leaves_unmeasured_optional_vitals_null(clinician):
+    response = post_json(clinician["headers"], [GOOD])
+    assert response.status_code == 200
+    stored = client.get("/vitals", headers=clinician["headers"]).json()[0]
+    assert stored["temperature_c"] is stored["spo2_percent"] is stored["respiratory_rate_bpm"] is None
+
+
 def test_upload_requires_authentication():
     assert client.post("/vitals/upload", json={"records": [GOOD]}).status_code == 401
     assert client.post("/vitals/upload/csv", files={"file": ("v.csv", b"x", "text/csv")}).status_code == 401
@@ -111,6 +126,16 @@ def test_csv_upload_succeeds(clinician):
     resp = post_csv(clinician["headers"], csv_text(3))
     assert resp.status_code == 200, resp.text
     assert resp.json()["stored"] == 3
+
+
+def test_csv_upload_stores_optional_vitals(clinician):
+    header = ("patient_ref,age_years,height_cm,weight_kg,systolic_bp,diastolic_bp,heart_rate_bpm,"
+              "temperature_c,spo2_percent,respiratory_rate_bpm,medication_count,medication_mg_total,label")
+    row = "P-CSV-OPTIONAL,50,170,70,120,80,70,37.2,98,16,0,0,1"
+    response = post_csv(clinician["headers"], f"{header}\n{row}\n")
+    assert response.status_code == 200
+    saved = client.get("/vitals", headers=clinician["headers"]).json()[0]
+    assert (saved["temperature_c"], saved["spo2_percent"], saved["respiratory_rate_bpm"]) == (37.2, 98, 16)
 
 
 def test_csv_at_exact_row_limit_succeeds(clinician):

@@ -10,6 +10,8 @@ const MODEL_TONE = { VALIDATED: "ok", DEPLOYED: "ok", FALLBACK: "stub", STUB: "s
 const VITAL_FIELDS = [
   ["age_years", "Age (years)"], ["height_cm", "Height (cm)"], ["weight_kg", "Weight (kg)"],
   ["systolic_bp", "Systolic BP"], ["diastolic_bp", "Diastolic BP"], ["heart_rate_bpm", "Heart rate (bpm)"],
+  ["temperature_c", "Temperature (°C)"], ["spo2_percent", "SpO2 (%)"],
+  ["respiratory_rate_bpm", "Respiratory rate (breaths/min)"],
   ["medication_count", "Medication count"], ["medication_mg_total", "Medication total (mg)"],
 ];
 const HISTORY_LISTS = [
@@ -232,6 +234,30 @@ function Report({ report }) {
       {contributions ? <ShapChart contributions={contributions} positiveLabel="toward model's positive class" />
         : <p className="synth-warning">Explanation unavailable: {report.explanation?.reason}</p>}
       <p className="cases__empty">{report.explanation.reliability}</p>
+      <h3>Reasoning and input use</h3>
+      <ul>
+        {(report.reasoning?.input_drivers || []).map((driver) => (
+          <li key={driver.source}>
+            {driver.source.replaceAll("_", " ")}: {driver.used_by_model ? "used by model" : "context only"}
+            {!driver.available && " — missing"}
+          </li>
+        ))}
+      </ul>
+      <p>
+        Missing inputs: {[...(report.reasoning?.missing_inputs?.modalities || []),
+          ...(report.reasoning?.missing_inputs?.features || [])].join(", ") || "none reported"}
+      </p>
+      <h3>Suggested considerations</h3>
+      {report.suggested_considerations?.items?.length ? (
+        <ul>
+          {report.suggested_considerations.items.map((item) => (
+            <li key={item.id}>
+              {item.text} <strong>{item.validation_status}</strong>
+              {" "}Source: {item.source} · rule {item.version}
+            </li>
+          ))}
+        </ul>
+      ) : <p>{report.suggested_considerations?.message || "no suggestion available"}</p>}
       {report.data_quality_warnings.length > 0 && (
         <ul className="synth-warning">{report.data_quality_warnings.map((w) => <li key={w.code}>{w.message}</li>)}</ul>
       )}
@@ -244,21 +270,40 @@ function Report({ report }) {
 
 function CaseDetail({ token, caseItem, onChanged }) {
   const [report, setReport] = useState(null);
+  const [analyses, setAnalyses] = useState(null);
+  const [analysisHistoryError, setAnalysisHistoryError] = useState(null);
   const [state, setState] = useState({ busy: false, error: null });
   const [decision, setDecision] = useState("ACCEPTED");
   const [note, setNote] = useState("");
   const [reviewMsg, setReviewMsg] = useState({ error: null, ok: null });
-  useEffect(() => { setReport(null); setState({ busy: false, error: null }); setReviewMsg({ error: null, ok: null }); }, [caseItem.id]);
+  const loadAnalyses = useCallback(() => {
+    setAnalysisHistoryError(null);
+    return authApi.listCaseAnalyses(token, caseItem.id)
+      .then(setAnalyses)
+      .catch((err) => { setAnalyses([]); setAnalysisHistoryError(explainError(err)); });
+  }, [token, caseItem.id]);
+  useEffect(() => {
+    setReport(null); setState({ busy: false, error: null });
+    setReviewMsg({ error: null, ok: null }); setAnalyses(null);
+    loadAnalyses();
+  }, [caseItem.id, loadAnalyses]);
 
   async function analyze() {
     setState({ busy: true, error: null }); setReport(null);
-    try { setReport(await synthesisApi.analyzeCase(token, caseItem.id)); setState({ busy: false, error: null }); }
+    try {
+      setReport(await synthesisApi.analyzeCase(token, caseItem.id));
+      await loadAnalyses();
+      setState({ busy: false, error: null });
+    }
     catch (e) { setState({ busy: false, error: explainError(e) }); }
   }
   async function review(e) {
     e.preventDefault();
     setReviewMsg({ error: null, ok: null });
-    try { await authApi.reviewCase(token, caseItem.id, decision, note); setReviewMsg({ error: null, ok: "Review recorded." }); onChanged(); }
+    try {
+      await authApi.reviewCase(token, caseItem.id, decision, note, report?.analysis_id || null);
+      setReviewMsg({ error: null, ok: "Review recorded." }); onChanged();
+    }
     catch (err) { setReviewMsg({ error: explainError(err), ok: null }); }
   }
   return (
@@ -272,6 +317,18 @@ function CaseDetail({ token, caseItem, onChanged }) {
       <button onClick={analyze} disabled={state.busy}>{state.busy ? "Analysing…" : "Run AI analysis"}</button>
       <Msg error={state.error} />
       {report && <Report report={report} />}
+      <section aria-label="Analysis history">
+        <h3>Analysis history</h3>
+        {analysisHistoryError && <p className="cases__error" role="alert">{analysisHistoryError}</p>}
+        {analyses === null ? <p>Loading analysis history…</p>
+          : analyses.length === 0 ? <p className="cases__empty">No saved analyses for this case.</p>
+            : <ul className="cases__list">{analyses.map((analysis) => (
+              <li key={analysis.analysis_id}>
+                {analysis.model_version} · {analysis.model_status} · {analysis.created_at || "time unavailable"}
+                {analysis.analysis_id === report?.analysis_id && " · current report"}
+              </li>
+            ))}</ul>}
+      </section>
       <form className="cases__form" onSubmit={review} aria-label="Clinician review">
         <h3>Clinician review</h3>
         <label>Decision
@@ -281,6 +338,9 @@ function CaseDetail({ token, caseItem, onChanged }) {
           </select>
         </label>
         <label>Note<textarea rows={3} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+        {report?.analysis_id
+          ? <p className="cases__empty">This review will be linked to analysis {report.analysis_id}.</p>
+          : <p className="cases__empty">No current analysis is selected; this review will not be linked to an analysis.</p>}
         <button type="submit">Submit review</button>
         <Msg error={reviewMsg.error} ok={reviewMsg.ok} />
       </form>

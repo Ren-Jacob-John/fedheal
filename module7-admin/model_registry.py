@@ -15,12 +15,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
 
 import models
 from audit import audit_event
 from auth import require_model_candidate_credential, require_promoted_model_read, require_super_admin
 from database import get_db
+from docstore import AlreadyExists
+from repo import Repo
 
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -219,9 +220,8 @@ class PromoteIn(BaseModel):
     note: Optional[str] = Field(default=None, max_length=500)
 
 
-def _current(db: Session, model_name: str, condition: str) -> Optional[models.ModelVersion]:
-    return (db.query(models.ModelVersion)
-            .filter_by(model_name=model_name, condition=condition, deployment_status="DEPLOYED").first())
+def _current(db: Repo, model_name: str, condition: str) -> Optional[models.ModelVersion]:
+    return db.get_deployed(model_name, condition)
 
 
 def build_router() -> APIRouter:
@@ -229,21 +229,48 @@ def build_router() -> APIRouter:
     policy = Policy()
 
     @router.post("/admin/models/candidates", response_model=ModelVersionOut, status_code=201)
-    def register_candidate(payload: CandidateIn, request: Request, db: Session = Depends(get_db),
+    def register_candidate(payload: CandidateIn, request: Request, db: Repo = Depends(get_db),
                            _=Depends(require_model_candidate_credential)):
         """Module 3 registers the global model a federated round produced.
         Registration deploys nothing."""
         assert_no_raw_data(payload.training_metadata, "$.training_metadata")
         assert_no_raw_data(payload.metrics, "$.metrics")
         assert_no_raw_data(payload.participating_hospitals, "$.participating_hospitals")
+        request_ids = payload.training_metadata.get("retraining_request_ids")
+        if request_ids is not None:
+            if (not isinstance(request_ids, list)
+                    or not all(isinstance(request_id, str) and request_id for request_id in request_ids)):
+                raise HTTPException(status_code=422, detail="Retraining request ids must be non-empty strings")
+            if (len(request_ids) != len(payload.participating_hospitals)
+                    or len(set(request_ids)) != len(request_ids)
+                    or len(set(payload.participating_hospitals)) != len(payload.participating_hospitals)):
+                raise HTTPException(status_code=422, detail="Retraining provenance must contain one unique request id per hospital")
+            linked = []
+            for request_id in request_ids:
+                retraining = db.get_retraining(request_id)
+                if retraining is None or retraining.hospital_id not in payload.participating_hospitals:
+                    raise HTTPException(status_code=409, detail="Retraining request provenance is invalid")
+                if retraining.status != "CLAIMED":
+                    raise HTTPException(status_code=409, detail="Retraining requests must be claimed before candidate registration")
+                linked.append(retraining)
+            if {row.hospital_id for row in linked} != set(payload.participating_hospitals):
+                raise HTTPException(status_code=409, detail="Retraining requests do not match participating hospitals")
+            existing_ids = {row.candidate_id for row in linked if row.candidate_id}
+            if existing_ids:
+                if len(existing_ids) == 1:
+                    existing = db.get_model(next(iter(existing_ids)))
+                    if (existing is not None
+                            and set(existing.training_metadata.get("retraining_request_ids", [])) == set(request_ids)
+                            and existing.artifact_hash == payload.artifact_hash):
+                        return existing
+                raise HTTPException(status_code=409, detail="A retraining request is already linked to another candidate")
         if payload.parameters is not None:
             validate_parameters(payload.parameters, payload.input_spec or {})
             if canonical_hash(payload.parameters["coef"], payload.parameters["intercept"]) != payload.artifact_hash:
                 audit_event("model.register", "denied", request=request, actor_service="module3",
                             reason="artifact_hash_mismatch")
                 raise HTTPException(status_code=422, detail="artifact_hash does not match the supplied parameters")
-        n = db.query(models.ModelVersion).filter_by(model_name=payload.model_name,
-                                                    condition=payload.condition).count()
+        n = db.count_versions(payload.model_name, payload.condition)
         cur = _current(db, payload.model_name, payload.condition)
         row = models.ModelVersion(
             model_name=payload.model_name, condition=payload.condition, version=f"v{n + 1}",
@@ -253,30 +280,30 @@ def build_router() -> APIRouter:
             artifact_hash=payload.artifact_hash, parameters=payload.parameters, input_spec=payload.input_spec,
             validation_status="PENDING", deployment_status="CANDIDATE",
         )
-        db.add(row)
-        db.commit()
-        db.refresh(row)
+        try:
+            db.add_model(row)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except AlreadyExists as exc:
+            raise HTTPException(status_code=409, detail="A retraining request is already linked to a candidate") from exc
         audit_event("model.register", "success", request=request, actor_service="module3",
                     resource_type="model", resource_id=row.id, model_version=row.version,
                     round_number=row.training_round)
         return row
 
     @router.get("/admin/models", response_model=list[ModelVersionOut])
-    def list_models(condition: Optional[str] = None, db: Session = Depends(get_db),
+    def list_models(condition: Optional[str] = None, db: Repo = Depends(get_db),
                     _=Depends(require_super_admin)):
-        q = db.query(models.ModelVersion)
-        if condition:
-            q = q.filter_by(condition=condition)
-        return q.order_by(models.ModelVersion.created_at.desc()).limit(200).all()
+        return db.list_models(condition, limit=200)
 
     def _get(db, model_id):
-        row = db.query(models.ModelVersion).filter_by(id=model_id).first()
+        row = db.get_model(model_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Model version not found")
         return row
 
     @router.post("/admin/models/{model_id}/validate", response_model=ModelVersionOut)
-    def validate_model(model_id: str, request: Request, db: Session = Depends(get_db),
+    def validate_model(model_id: str, request: Request, db: Repo = Depends(get_db),
                        admin: dict = Depends(require_super_admin)):
         row = _get(db, model_id)
         if row.deployment_status != "CANDIDATE":
@@ -292,15 +319,14 @@ def build_router() -> APIRouter:
         row.validation_report = report
         row.validation_status = "PASSED" if report["passed"] else "FAILED"
         row.deployment_status = "VALIDATED" if report["passed"] else "REJECTED"
-        db.commit()
-        db.refresh(row)
+        db.save_models(row)
         audit_event("model.validate", "success" if report["passed"] else "denied", request=request,
                     actor_user_id=admin.get("sub"), actor_role=admin.get("role"),
                     resource_type="model", resource_id=row.id, model_version=row.version)
         return row
 
     @router.post("/admin/models/{model_id}/promote", response_model=ModelVersionOut)
-    def promote_model(model_id: str, payload: PromoteIn, request: Request, db: Session = Depends(get_db),
+    def promote_model(model_id: str, payload: PromoteIn, request: Request, db: Repo = Depends(get_db),
                       admin: dict = Depends(require_super_admin)):
         """The approval gate: an explicit super_admin action, allowed only for a model that PASSED validation."""
         row = _get(db, model_id)
@@ -318,26 +344,25 @@ def build_router() -> APIRouter:
         row.deployment_status = "DEPLOYED"
         row.approved_at = datetime.now(timezone.utc)
         row.approved_by = admin.get("sub")
-        db.commit()
-        db.refresh(row)
+        # both rows (the retired one and the promoted one) change in one atomic commit
+        db.save_models(*([cur, row] if cur is not None else [row]))
         audit_event("model.promote", "success", request=request, actor_user_id=admin.get("sub"),
                     actor_role=admin.get("role"), resource_type="model", resource_id=row.id,
                     model_version=row.version)
         return row
 
     @router.post("/admin/models/rollback", response_model=ModelVersionOut)
-    def rollback(model_name: str, condition: str, request: Request, db: Session = Depends(get_db),
+    def rollback(model_name: str, condition: str, request: Request, db: Repo = Depends(get_db),
                  admin: dict = Depends(require_super_admin)):
         cur = _current(db, model_name, condition)
         if cur is None or not cur.replaces_id:
             raise HTTPException(status_code=409, detail="There is no previous approved model to roll back to")
-        prev = db.query(models.ModelVersion).filter_by(id=cur.replaces_id).first()
+        prev = db.get_model(cur.replaces_id)
         if prev is None or prev.deployment_status != "RETIRED":
             raise HTTPException(status_code=409, detail="The previous approved model is not available for rollback")
         cur.deployment_status = "ROLLED_BACK"
         prev.deployment_status = "DEPLOYED"
-        db.commit()
-        db.refresh(prev)
+        db.save_models(cur, prev)
         audit_event("model.rollback", "success", request=request, actor_user_id=admin.get("sub"),
                     actor_role=admin.get("role"), resource_type="model", resource_id=prev.id,
                     model_version=prev.version)
@@ -345,13 +370,10 @@ def build_router() -> APIRouter:
 
     @router.get("/admin/models/promoted")
     def promoted_model(request: Request, condition: str, model_name: Optional[str] = None,
-                       db: Session = Depends(get_db), _=Depends(require_promoted_model_read)):
+                       db: Repo = Depends(get_db), _=Depends(require_promoted_model_read)):
         """What Module 8 serves: the currently DEPLOYED (promoted) model with its weights and provenance.
         Aggregates and weights only; nothing patient-level exists in the registry."""
-        q = db.query(models.ModelVersion).filter_by(condition=condition, deployment_status="DEPLOYED")
-        if model_name:
-            q = q.filter_by(model_name=model_name)
-        row = q.order_by(models.ModelVersion.approved_at.desc()).first()
+        row = db.get_promoted(condition, model_name)
         if row is None or row.parameters is None:
             raise HTTPException(status_code=404, detail="No promoted model for this condition")
         return {"id": row.id, "model_name": row.model_name, "version": row.version,
@@ -364,7 +386,7 @@ def build_router() -> APIRouter:
                 "parameters": row.parameters, "input_spec": row.input_spec}
 
     @router.get("/admin/models/current", response_model=ModelVersionOut)
-    def current_model(model_name: str, condition: str, db: Session = Depends(get_db),
+    def current_model(model_name: str, condition: str, db: Repo = Depends(get_db),
                       _=Depends(require_super_admin)):
         cur = _current(db, model_name, condition)
         if cur is None:

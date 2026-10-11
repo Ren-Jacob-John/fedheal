@@ -1,5 +1,5 @@
 """
-config.py / service_auth.py / audit.py / limits.py are copied into each
+config.py / service_auth.py / audit.py / limits.py / docstore.py are copied into each
 module that needs them (modules deploy independently). The copies must stay
 byte-identical; this fails loudly if someone edits only one.
 
@@ -15,6 +15,7 @@ COPIES = {
     "service_auth.py": ["module1-auth", "module2-validation", "module3-fedlearning", "module7-admin", "module8-synthesis"],
     "audit.py": ["module1-auth", "module2-validation", "module7-admin", "module8-synthesis"],
     "limits.py": ["module1-auth", "module2-validation"],
+    "docstore.py": ["module1-auth", "module7-admin"],
 }
 
 

@@ -98,7 +98,17 @@ def test_label_attestation_is_derived_and_privacy_gaps_are_stated_honestly():
     assert _payload(False)["training_metadata"]["labels_from_hospital_only"] is False
     meta = _payload()["training_metadata"]
     assert meta["differential_privacy"] is False and meta["secure_aggregation"] is False
-    assert meta["update_clipping"] is False and "none" in meta["transport_encryption"]
+    assert meta["update_clipping"] is False and meta["gaussian_update_noise"] is False
+    assert meta["transport_encryption"] == "in-process; no update transport"
+
+
+def test_payload_metadata_reflects_optional_clip_and_noise_without_claiming_dp(monkeypatch):
+    monkeypatch.setenv("FEDHEAL_UPDATE_CLIP_NORM", "2.5")
+    monkeypatch.setenv("FEDHEAL_UPDATE_NOISE_MULTIPLIER", "0.1")
+    metadata = _payload()["training_metadata"]
+    assert metadata["update_clipping"] is True and metadata["update_clip_norm"] == 2.5
+    assert metadata["gaussian_update_noise"] is True and metadata["update_noise_multiplier"] == 0.1
+    assert metadata["differential_privacy"] is False
 
 
 def test_register_returns_none_when_module7_is_down(monkeypatch):

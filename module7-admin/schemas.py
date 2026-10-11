@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HospitalStatusUpdate(BaseModel):
@@ -21,6 +21,39 @@ class TrainingRoundOut(TrainingRoundIn):
 
     class Config:
         from_attributes = True
+
+
+class RetrainingEligibilityIn(BaseModel):
+    eligible_records: int = Field(ge=0)
+
+
+class RetrainingRequestOut(BaseModel):
+    id: str
+    hospital_id: str
+    eligible_records: int
+    threshold_bucket: int
+    baseline_records: int
+    status: str
+    candidate_id: str | None = None
+    created_at: datetime
+    claimed_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class RetrainingCandidateStatusOut(BaseModel):
+    registered: bool
+    candidate_id: str | None = None
+    version: str | None = None
+    deployment_status: str | None = None
+
+
+class RetrainingCompletionIn(BaseModel):
+    request_id: str
+    status: str = Field(pattern="^(COMPLETED|FAILED)$")
+    eligible_records: int | None = Field(default=None, ge=0)
 
 
 class ValidationFlagIn(BaseModel):

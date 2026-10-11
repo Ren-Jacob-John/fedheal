@@ -24,9 +24,9 @@ dashboard form were naming features (`cholesterol`, `glucose`,
 
 | Module | Fields | Notes |
 |---|---|---|
-| 1 `StoredVitalsOut` / `vitals_records` | `age_years`, `height_cm`, `weight_kg`, `systolic_bp`*, `diastolic_bp`*, `heart_rate_bpm`*, `medication_count`, `medication_mg_total`, `label`*, `label_source`, `validation_status`, `patient_ref`, `id` | `*` nullable. Module 2 allows a record without the three vitals. |
-| 2 `VitalsRecord` | same 8 + optional `label` | Rejects out-of-range/inconsistent; flags soft outliers. |
-| 3 real path `real_data.FEATURE_KEYS` | `age_years, systolic_bp, diastolic_bp, heart_rate_bpm, weight_kg, height_cm, medication_count, medication_mg_total` (fixed normalisation) | Logistic regression via FedAvg. **No global model is persisted/exported.** |
+| 1 `StoredVitalsOut` / `vitals_records` | the original 8 fields plus optional `temperature_c`, `spo2_percent`, `respiratory_rate_bpm`, `label`*, `label_source`, `validation_status`, `patient_ref`, `id` | The 3 added fields are nullable. Existing Firestore documents load with `None` defaults. |
+| 2 `VitalsRecord` | same fields + optional `label` | Rejects out-of-range/inconsistent; flags soft outliers. Added ranges: temperature 25–45 C, SpO2 0–100%, respiratory rate >0–100/min. |
+| 3 real path `real_data.FEATURE_KEYS` | Version `v1`: original 8 model fields, fixed versioned normalisation | Logistic regression via FedAvg. **No global model is persisted/exported.** New records missing a required training field are excluded, not zero-filled. |
 | 3 synthetic `data.FEATURE_NAMES` | `age, resting_bp, cholesterol, max_heart_rate, bmi, glucose, num_medications, prior_admissions` | Names on random data. Simulation only. |
 | 5 `tabular_vitals` / `tabular_vitals_tabpfn` | **now** the Module 1 names above, same order | Was the synthetic names. Declared as `feature_names` on the specialist. |
 | 6 `ConditionRouter` | validates `case["features"]` against the specialist's `feature_names` | Missing → `IncompleteDataError`. |
@@ -34,6 +34,18 @@ dashboard form were naming features (`cholesterol`, `glucose`,
 
 `N_FEATURES` is still 8 and the order is unchanged, so Modules 3/5/6 keep
 their shapes.
+
+The extra vitals are nullable stored fields. Module 8 declares a v2 feature
+schema that appends them to v1 and explicitly marks absent values missing;
+the current demo/promoted v1 model stays usable with its unchanged schema.
+Module 3 still trains v1 only: its `feature_transform("v2")` fails closed
+until a traceable, validated normalization source exists. Vitals absent from
+the selected training schema are never filled with zero or a mean.
+
+History, admission reason, presenting symptoms, and condition are mapped as
+availability/context/specialist-selection metadata only. No verified
+categorical representation or labeled training data supports using them as
+model features; no encodings or feature contributions are fabricated.
 
 ## Feature mapper (Module 8: `feature_mapper.py`)
 
@@ -130,7 +142,9 @@ model — is removed.
 
 - **Case** (`cases`): `hospital_id` (from the session), `patient_ref` (synthetic id, `[A-Za-z0-9._-]`), `encounter_id`, `admission_reason`, `current_condition` (a Module 6 condition key; analysis never guesses it), `presenting_symptoms` (list), `status` (`OPEN|REVIEWED|NEEDS_MORE_DATA`).
 - **Medical history** (`medical_histories`, one per case): lists of short strings (≤ 50 items × 200 chars) — conditions, previous diagnoses, surgeries, allergies, medications, family history, previous admissions, symptoms — plus `notes` (≤ 2000 chars). **Not a model input.**
-- **Vitals**: unchanged schema; now linkable via `vitals_records.case_id`. **Not added** (would change the model's input dimension and Module 2's schema): temperature, SpO2, respiratory rate.
+- **Vitals**: unchanged schema; now linkable via `vitals_records.case_id`. **Added as optional validated/stored fields**: temperature, SpO2, respiratory rate. The existing promoted model's `input_spec.feature_schema_version` and ordered `feature_names` preserve its v1 input contract. The Module 8 mapper can describe v2 (v1 + these 3 fields) without imputing absent fields. However, **no v2 model is trained or registered**: the repository has no traceable transform reference, validated training dataset, or trained artifact for these features. Module 3 refuses v2 training until an explicit, sourced transform is available. History, symptoms, admission reason, and condition are reported as context/selection metadata only; no defensible, labelled training data/model encodings exist to make them model inputs.
+
+Persistence is Firestore document storage. There is no Alembic migration layer; new dataclass fields use defaults when old documents are read.
 - **Scan** (`scans`): metadata + server-side file reference; PNG/JPEG only; `status UPLOADED`; no analysis.
 - **Review** (`clinician_reviews`): decision + note; never a training label.
 - **Registry** (`model_versions`): ids, hashes, aggregate metrics, weights (≤ 64 numbers) and the input transform (feature names, centre, scale). No patient-level fields; enforced on write.

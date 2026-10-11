@@ -1,48 +1,37 @@
 """
 Database for the Admin/Platform module's OWN data only: training-round
-history and validation-flag summaries. Supabase (Postgres) in production,
-SQLite fallback for local dev — see module1-auth/database.py's docstring
-for the reasoning; this file mirrors that pattern exactly.
+history, validation-flag summaries and the model registry. Firestore in
+staging/production, a local JSON-file store for development — see
+docstore.py for the backend rules and module1-auth/database.py's docstring
+for the environment variables (they are identical here).
 
-Deliberately does NOT store a copy of the hospitals table — hospital
-identity/status lives in Module 1 and Module 7 always asks Module 1 for
-the current truth (see hospitals_client.py). Duplicating that table here
-would just create a second source of truth that can drift out of sync,
-which is exactly the kind of bug that's easy to introduce and annoying to
-find later.
+Deliberately does NOT store a copy of the hospitals collection — hospital
+identity/status lives in Module 1 and Module 7 always asks Module 1 for the
+current truth (see hospitals_client.py). Duplicating it here would create a
+second source of truth that can drift out of sync.
 
-This module's tables (training_rounds, validation_flags) can safely live
-in the SAME Supabase project as Module 1's (hospitals, users,
-vitals_records) — the table names don't collide, and Supabase happily
-hosts multiple services' tables in one Postgres database, same as any
-shared Postgres instance would.
+Module 7 may share a Firebase project (and even the default database) with
+Module 1: the collection names don't collide. Set FEDHEAL_ADMIN_FIRESTORE_DATABASE
+to give this service a named database of its own.
 """
 import os
 
+import config
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
 
-load_dotenv()  # picks up .env in this folder if present — see module1-auth/README.md's "Using Supabase" section
+from docstore import make_backend
+from repo import Repo
 
-DATABASE_URL = os.environ.get(
-    "FEDHEAL_ADMIN_DATABASE_URL",
-    os.environ.get("FEDHEAL_DATABASE_URL", "sqlite:///./fedheal_admin.db"),
-)
+load_dotenv()  # picks up .env in this folder if present
 
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+if os.environ.get("FEDHEAL_ADMIN_FIRESTORE_DATABASE", "").strip():
+    os.environ["FEDHEAL_FIRESTORE_DATABASE"] = os.environ["FEDHEAL_ADMIN_FIRESTORE_DATABASE"].strip()
 
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+backend = make_backend(local_default_path="./fedheal_admin_store.json",
+                       is_local=config.is_local(), env=config.current_env())
+repo = Repo(backend)
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def get_db() -> Repo:
+    """FastAPI dependency (name kept from the SQL version): the module's repository."""
+    return repo

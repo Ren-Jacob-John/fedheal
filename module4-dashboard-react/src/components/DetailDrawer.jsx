@@ -30,8 +30,6 @@ export default function DetailDrawer({
   overview,
   rounds,
   flags,
-  onTriggerRound,
-  triggering,
   onUploaded,
   onSetHospitalActive,
 }) {
@@ -106,11 +104,6 @@ export default function DetailDrawer({
             </>
           )}
 
-          {isSuperAdmin && (
-            <button className="btn btn--primary btn--block" onClick={onTriggerRound} disabled={triggering}>
-              {triggering ? "Round in progress…" : "Trigger new federated round"}
-            </button>
-          )}
         </>
       ) : (
         <>

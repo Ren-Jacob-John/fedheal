@@ -1,11 +1,12 @@
 """
 Two-hospital federated run against the real services, then the registry gate.
 
-  Module 1 + Module 2 + Module 7 + Module 8 as real processes (throwaway SQLite)
+  Module 1 + Module 2 + Module 7 + Module 8 as real processes
+    (throwaway local document stores)
     -> seed_uci_heart.py uploads public UCI Cleveland records for TWO hospitals
        through Module 1's front door (so they pass Module 2's validation)
-    -> simulate_real.py: each hospital trains locally, FedAvg aggregates,
-       the global model is scored on a pooled holdout, a CANDIDATE is registered
+    -> hospital-local watch runners: each hospital trains locally, Flower
+       aggregates, and a CANDIDATE is registered with request/count provenance
     -> Module 7: candidate is NOT deployed; validation gate decides; only a
        passing model can be promoted by a super_admin.
     -> Module 8 (demo fallback DISABLED): refuses to analyse before promotion,
@@ -25,11 +26,16 @@ Run from the repo root:  pytest tests/integration/test_federation_flow.py -v
 """
 import json
 import os
+import pathlib
+import socket
 import subprocess
 import sys
 import tempfile
+import time
+import uuid
 
 import httpx
+import numpy as np
 import pytest
 
 from test_doctor_workflow import VITALS, make_hospital_with_doctor
@@ -38,13 +44,41 @@ from test_e2e_flow import ADMIN_PASSWORD, ROOT, Service, base_env, bearer, free_
 M3 = ROOT / "module3-fedlearning"
 
 
+def _mint_scoped_token(hospital_id: str, audience: str, signing_key: str) -> str:
+    sys.path.insert(0, str(M3))
+    try:
+        import service_auth
+        return service_auth.mint_service_token(
+            signing_key,
+            caller="module3",
+            audience=audience,
+            hospital_id=hospital_id,
+            ttl_seconds=3600,
+        )
+    finally:
+        sys.path.remove(str(M3))
+
+
+def _wait_for_flower(port: int, process: subprocess.Popen, log_path: pathlib.Path,
+                     timeout: float = 60) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(f"Flower server exited early:\n{log_path.read_text()[-3000:]}")
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                return
+        except OSError:
+            time.sleep(0.25)
+    raise RuntimeError(f"Flower server did not listen:\n{log_path.read_text()[-3000:]}")
+
+
 @pytest.fixture(scope="module")
 def fed():
     tmp = tempfile.mkdtemp(prefix="fedheal_fed_")
-    p1, p2, p7, p8 = free_port(), free_port(), free_port(), free_port()
-    m1_env = base_env(FEDHEAL_DATABASE_URL=f"sqlite:///{tmp}/auth.db", FEDHEAL_VALIDATION_API_URL=f"http://127.0.0.1:{p2}")
-    subprocess.run([sys.executable, "-c", "import database, models; database.Base.metadata.create_all(bind=database.engine)"],
-                   cwd=ROOT / "module1-auth", env=m1_env, check=True, timeout=60)
+    p1, p2, p7, p8, pflower = (free_port() for _ in range(5))
+    m1_env = base_env(FEDHEAL_DB_BACKEND="local", FEDHEAL_LOCAL_STORE_PATH=f"{tmp}/auth_store.json",
+                      FEDHEAL_VALIDATION_API_URL=f"http://127.0.0.1:{p2}")
     subprocess.run([sys.executable, "create_super_admin.py", "--email", "admin@fed.fedheal.local"],
                    cwd=ROOT / "module1-auth", env={**m1_env, "FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD": ADMIN_PASSWORD},
                    check=True, timeout=60, capture_output=True)
@@ -52,11 +86,12 @@ def fed():
         "m1": Service("module1", "module1-auth", p1, m1_env, tmp),
         "m2": Service("module2", "module2-validation", p2, base_env(FEDHEAL_ADMIN_API_URL=f"http://127.0.0.1:{p7}"), tmp),
         "m7": Service("module7", "module7-admin", p7,
-                      base_env(FEDHEAL_ADMIN_DATABASE_URL=f"sqlite:///{tmp}/admin.db",
+                      base_env(FEDHEAL_DB_BACKEND="local", FEDHEAL_LOCAL_STORE_PATH=f"{tmp}/admin_store.json",
                                FEDHEAL_AUTH_API_URL=f"http://127.0.0.1:{p1}",
                                # TEST-ONLY relaxed gate (see module docstring)
                                FEDHEAL_GATE_MIN_ACCURACY="0.5", FEDHEAL_GATE_MIN_EVAL_EXAMPLES="30",
-                               FEDHEAL_GATE_MAX_HOSPITAL_GAP="0.6", FEDHEAL_GATE_MIN_MARGIN_OVER_MAJORITY="0.0"), tmp),
+                               FEDHEAL_GATE_MAX_HOSPITAL_GAP="0.6", FEDHEAL_GATE_MIN_MARGIN_OVER_MAJORITY="0.0",
+                               FEDHEAL_RETRAIN_MIN_ELIGIBLE_RECORDS="1"), tmp),
         # Demo fallback explicitly OFF: any answer must come from the promoted federated model.
         "m8": Service("module8", "module8-synthesis", p8,
                       base_env(FEDHEAL_AUTH_API_URL=f"http://127.0.0.1:{p1}", FEDHEAL_ADMIN_API_URL=f"http://127.0.0.1:{p7}",
@@ -72,9 +107,156 @@ def fed():
         seed = subprocess.run([sys.executable, "seed_uci_heart.py", "--hospitals", "2", "--auth-url", services["m1"].url],
                               cwd=M3, env=env, capture_output=True, text=True, timeout=300)
         assert seed.returncode == 0, seed.stdout[-1500:] + seed.stderr[-1500:]
-        run = subprocess.run([sys.executable, "simulate_real.py"], cwd=M3, env=env,
-                             capture_output=True, text=True, timeout=300)
-        assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-1500:]
+
+        admin = login(services["m1"], "admin@fed.fedheal.local", ADMIN_PASSWORD)
+        hospitals = httpx.get(f"{services['m1'].url}/hospitals",
+                              headers=bearer(admin), timeout=20).json()
+        assert len(hospitals) == 2
+        runner_specs = []
+        for index, hospital in enumerate(hospitals, start=1):
+            hospital_id = hospital["id"]
+            runner_specs.append({
+                "hospital_id": hospital_id,
+                "user_token": login(services["m1"], f"seed-admin-{index}@fedheal.local",
+                                    "uci-seed-demo-password"),
+                "queue_token": _mint_scoped_token(
+                    hospital_id, "module7:retraining-runner",
+                    "dev-only-signing-key-module3-to-module7",
+                ),
+                "vitals_token": _mint_scoped_token(
+                    hospital_id, "module1:vitals-export",
+                    "dev-only-signing-key-module3-to-module1",
+                ),
+            })
+
+        server_port = pflower
+        server_log_path = pathlib.Path(tmp) / "flower-server.log"
+        server_log = open(server_log_path, "w", encoding="utf-8")
+        server_env = {**env, "FEDHEAL_ADMIN_API_URL": services["m7"].url}
+        server = subprocess.Popen(
+            [sys.executable, "server.py", "--min-clients", "2", "--rounds", "1",
+             "--address", f"127.0.0.1:{server_port}"],
+            cwd=M3, env=server_env, stdout=server_log, stderr=subprocess.STDOUT,
+        )
+        client_logs = []
+        client_processes = []
+        try:
+            _wait_for_flower(server_port, server, server_log_path)
+            for index, spec in enumerate(runner_specs, start=1):
+                log = open(pathlib.Path(tmp) / f"flower-client-{index}.log", "w", encoding="utf-8")
+                client_logs.append(log)
+                client_env = {
+                    **env,
+                    "FEDHEAL_AUTH_API_URL": services["m1"].url,
+                    "FEDHEAL_ADMIN_API_URL": services["m7"].url,
+                    "FEDHEAL_SVC_TOKEN_M3_M1": spec["vitals_token"],
+                    "FEDHEAL_SVC_TOKEN_M3_M7": spec["queue_token"],
+                }
+                client_processes.append(subprocess.Popen(
+                    [sys.executable, "client_runner.py", "--hospital-id", spec["hospital_id"],
+                     "--server", f"127.0.0.1:{server_port}", "--min-records", "10",
+                     "--watch-retraining", "--poll-seconds", "1"],
+                    cwd=M3, env=client_env, stdout=log, stderr=subprocess.STDOUT,
+                ))
+
+            # Do not infer readiness from a fixed delay: loading validated
+            # records happens inside each hospital process and can take
+            # longer on CI. Wait for each runner's first count-only report,
+            # which initializes its baseline in the fresh Module 7 store.
+            baseline_deadline = time.monotonic() + 60
+            hospital_ids = {spec["hospital_id"] for spec in runner_specs}
+            while time.monotonic() < baseline_deadline:
+                log_text = services["m7"].log_path.read_text(encoding="utf-8", errors="replace")
+                reported = {
+                    hospital_id for hospital_id in hospital_ids
+                    if f'"action":"retraining.eligibility"' in log_text
+                    and f'"target_hospital_id":"{hospital_id}"' in log_text
+                }
+                if reported == hospital_ids:
+                    break
+                if any(process.poll() not in (None, 0) for process in client_processes):
+                    logs = "\n".join(
+                        (pathlib.Path(tmp) / f"flower-client-{i}.log").read_text(
+                            encoding="utf-8", errors="replace"
+                        )[-3000:]
+                        for i in (1, 2)
+                    )
+                    raise RuntimeError(f"A hospital runner failed before establishing its baseline:\n{logs}")
+                time.sleep(0.25)
+            else:
+                raise RuntimeError("Hospital runners did not establish count-only retraining baselines.")
+
+            # A batch is needed because Module 2's outlier screen can flag a
+            # singleton. The named synthetic test rows are never production
+            # data and only exercise the threshold-trigger path.
+            for index, spec in enumerate(runner_specs, start=1):
+                records = []
+                for row in range(20):
+                    medication_count = row % 4
+                    records.append({
+                        "patient_ref": f"SYNTHETIC-QUEUE-{index}-{uuid.uuid4().hex}",
+                        "age_years": 40 + row,
+                        "height_cm": 160 + (row % 5) * 4,
+                        "weight_kg": 55 + row * 1.2,
+                        "systolic_bp": 105 + row * 2,
+                        "diastolic_bp": 65 + row,
+                        "heart_rate_bpm": 60 + row * 2,
+                        "medication_count": medication_count,
+                        "medication_mg_total": medication_count * 50,
+                        "label": row % 2,
+                    })
+                upload = httpx.post(
+                    f"{services['m1'].url}/vitals/upload",
+                    headers=bearer(spec["user_token"]),
+                    json={"records": records},
+                    timeout=30,
+                )
+                assert upload.status_code == 200, upload.text
+                assert upload.json()["passed"] > 0, upload.json()
+
+            deadline = time.monotonic() + 180
+            while time.monotonic() < deadline:
+                if server.poll() is not None and server.returncode != 0:
+                    raise RuntimeError(f"Flower server failed:\n{server_log_path.read_text()[-4000:]}")
+                queue = httpx.get(
+                    f"{services['m7'].url}/admin/retraining/requests",
+                    headers=bearer(admin), timeout=20,
+                )
+                assert queue.status_code == 200, queue.text
+                if len(queue.json()) == 2 and all(item["status"] == "COMPLETED" for item in queue.json()):
+                    break
+                if any(process.poll() not in (None, 0) for process in client_processes):
+                    logs = "\n".join(
+                        (pathlib.Path(tmp) / f"flower-client-{i}.log").read_text()[-3000:]
+                        for i in (1, 2)
+                    )
+                    raise RuntimeError(f"A hospital Flower runner failed:\n{logs}")
+                time.sleep(1)
+            else:
+                logs = server_log_path.read_text()[-4000:]
+                raise RuntimeError(f"Timed out waiting for retraining completion:\n{logs}")
+
+            server.wait(timeout=30)
+            assert server.returncode == 0, server_log_path.read_text()[-4000:]
+            run = type("RunOutput", (), {"stdout": server_log_path.read_text()})()
+        finally:
+            for process in client_processes:
+                if process.poll() is None:
+                    process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+            for log in client_logs:
+                log.close()
+            if server.poll() is None:
+                server.terminate()
+                try:
+                    server.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    server.kill()
+            server_log.close()
+
         def promoted_headers():
             sys.path.insert(0, str(ROOT / "module8-synthesis"))
             try:
@@ -87,7 +269,7 @@ def fed():
             return {"X-Service-Key": mod.mint_service_token("dev-only-signing-key-module8-to-module7", caller="module8",
                                                             audience=mod.AUD_PROMOTED_MODEL, hospital_id="*")}
         yield {"svc": services, "run": run, "tmp": tmp, "promoted_headers": promoted_headers,
-               "admin": login(services["m1"], "admin@fed.fedheal.local", ADMIN_PASSWORD)}
+               "admin": admin}
     finally:
         for s in services.values():
             s.stop()
@@ -101,7 +283,7 @@ def models_(fed):
 
 def test_two_hospitals_trained_and_a_candidate_was_registered_but_not_deployed(fed):
     out = fed["run"].stdout
-    assert "Registered candidate v1" in out and "NOT deployed" in out
+    assert "FINAL_ACCURACY:" in out
     rows = models_(fed)
     assert len(rows) == 1
     c = rows[0]
@@ -122,17 +304,11 @@ def test_registry_row_contains_no_patient_level_data(fed):
     assert meta["differential_privacy"] is False and meta["secure_aggregation"] is False   # stated honestly
 
 
-def test_exported_weights_match_the_registered_hash(fed):
-    import numpy as np
-    sys.path.insert(0, str(M3))
-    try:
-        import federation_registry as fr
-    finally:
-        sys.path.remove(str(M3))
+def test_candidate_hash_is_reported_without_exposing_candidate_weights(fed):
     c = models_(fed)[0]
-    files = [f for f in os.listdir(f"{fed['tmp']}/artifacts") if f.endswith(".npz")]
-    assert len(files) == 1
-    assert fr.verify_artifact(os.path.join(fed["tmp"], "artifacts", files[0]), c["artifact_hash"])
+    assert "parameters" not in c
+    assert len(c["artifact_hash"]) == 64
+    assert all(character in "0123456789abcdef" for character in c["artifact_hash"].lower())
 
 
 def make_case_with_vitals(fed):
@@ -184,6 +360,15 @@ def test_inference_serves_exactly_the_promoted_model_with_provenance(fed):
     import numpy as np
     promoted = httpx.get(f"{fed['svc']['m7'].url}/admin/models/promoted", params={"condition": "heart_disease"},
                          headers=fed["promoted_headers"](), timeout=20).json()
+    sys.path.insert(0, str(M3))
+    try:
+        import federation_registry as fr
+    finally:
+        sys.path.remove(str(M3))
+    assert fr.artifact_hash([
+        np.asarray(promoted["parameters"]["coef"], dtype=float),
+        np.asarray(promoted["parameters"]["intercept"], dtype=float),
+    ]) == reg["artifact_hash"]
     spec, coef = promoted["input_spec"], np.array(promoted["parameters"]["coef"][0])
     x = (np.array([VITALS[n] for n in spec["feature_names"]], float) - np.array(spec["center"])) / np.array(spec["scale"])
     z = float(coef @ x + promoted["parameters"]["intercept"][0])

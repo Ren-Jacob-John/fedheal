@@ -61,6 +61,26 @@ def test_mapper_never_uses_label_or_identifiers_as_input():
     assert all(i["source_field"] not in feature_mapper.NON_INPUT_FIELDS for i in m.inputs)
 
 
+def test_v2_optional_vitals_schema_reports_missing_fields_without_imputation():
+    names = [rule.model_feature for rule in feature_mapper.VITALS_SCHEMA_VERSIONS["v2"]]
+    mapped = feature_mapper.map_record(RECORD, names)
+    assert mapped.missing == ["temperature_c", "spo2_percent", "respiratory_rate_bpm"]
+    assert mapped.features[-3:] == [None, None, None]
+    assert all(item["value"] is None for item in mapped.inputs[-3:])
+
+
+def test_context_features_are_metadata_only_and_never_echoed():
+    context = feature_mapper.map_case_context(
+        {"admission_reason": "RAW-REASON-QZ", "current_condition": "heart_disease",
+         "presenting_symptoms": ["RAW-SYMPTOM-QZ"]},
+        {"conditions": ["RAW-HISTORY-QZ"]}, RECORD, VITALS_FIELDS,
+    )
+    assert context["input_drivers"][0]["used_by_model"] is True
+    assert all(driver["used_by_model"] is False for driver in context["input_drivers"][1:])
+    assert "RAW-" not in str(context)
+    assert context["unused_inputs"][:3] == ["medical_history", "presenting_symptoms", "admission_reason"]
+
+
 def test_mapper_drift_is_detected():
     with pytest.raises(feature_mapper.MappingDriftError):
         feature_mapper.verify_mapping(["age", "resting_bp", "cholesterol", "max_heart_rate",

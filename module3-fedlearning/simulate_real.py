@@ -1,5 +1,5 @@
 """
-Module 3 — FedAvg over REAL, validated hospital data.
+Deprecated centralized real-data simulation (disabled for privacy).
 
 Run: python simulate_real.py
 
@@ -14,9 +14,10 @@ Prerequisites (this is real integration, not a standalone demo):
   3. At least 2 hospitals registered in Module 1, each with >= MIN_RECORDS
      validated vitals uploaded (via the dashboard's upload form, or curl
      against POST /vitals/upload — see module1-auth/README.md)
-  4. FEDHEAL_SVC_SIGNING_KEY_M3_M1 exported here, equal to Module 1's, so
-     this operator tool can mint a per-hospital token for each
-     GET /vitals/export (operator-only key: never on a hospital machine).
+  This operator-side process previously fetched and pooled multiple hospitals'
+  raw records in one process. That violates the hospital privacy boundary and
+  is now refused by real_data.load_real_partitions(). Use hospital-local
+  client_runner.py processes for the networked Flower path.
 
 If fewer than 2 hospitals have enough data yet, this exits with instructions
 rather than silently falling back to synthetic data — pretending real
@@ -92,7 +93,7 @@ def report_round_to_admin(round_number: int, n_hospitals: int,
 def main():
     args = parse_args()
 
-    print("Pulling active hospitals + validated vitals from Module 1...\n")
+    print("Centralized real-data pooling is disabled; raw hospital records may not leave a hospital.\n")
     try:
         hospital_names, partitions, provenances = load_real_partitions(
             min_records_per_hospital=MIN_RECORDS,
@@ -104,6 +105,9 @@ def main():
     except httpx.HTTPError as e:
         print(f"Could not reach Module 1 (is it running on :8001?): {e}")
         sys.exit(1)
+    except RuntimeError as e:
+        print(f"Refusing centralized training: {e}")
+        sys.exit(2)
 
     # One line per hospital, before anything is trained, so the label story
     # is on screen ahead of every accuracy number this script prints.
@@ -154,7 +158,7 @@ def main():
         for name, (X_train, X_test, y_train, y_test) in zip(hospital_names, hospital_splits)
     ]
 
-    global_params = get_model_parameters(build_model())
+    global_params = get_model_parameters(build_model(N_FEATURES))
 
     # Stamped onto every round row Module 7 stores, so a placeholder run
     # can't be mistaken for a clean one later when someone is reading the
@@ -167,7 +171,7 @@ def main():
 
     print(f"{'round':>5} | {'global model acc. on global holdout':>36}")
     print("-" * 46)
-    eval_model = build_model()
+    eval_model = build_model(N_FEATURES)
     global_acc = baseline_acc
     for round_num in range(1, N_ROUNDS + 1):
         client_params, client_sizes = [], []
@@ -200,7 +204,8 @@ def main():
             local_only_baseline=baseline_acc, majority_class_floor=majority, digest=digest,
             provenances=provenances, data_source="hospital_validated_vitals_via_module1",
             params=global_params,
-            input_spec={"feature_names": list(FEATURE_KEYS), "center": [float(v) for v in _FEATURE_MEAN],
+            input_spec={"feature_schema_version": os.environ.get("FEDHEAL_VITALS_FEATURE_SCHEMA", "v1"),
+                        "feature_names": list(FEATURE_KEYS), "center": [float(v) for v in _FEATURE_MEAN],
                         "scale": [float(v) for v in _FEATURE_STD]})
         stored = federation_registry.register_candidate(payload)
         if stored is None:

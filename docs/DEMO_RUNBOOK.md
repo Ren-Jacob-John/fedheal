@@ -1,13 +1,22 @@
 # Demo runbook (synthetic / public data only)
 
+**Execution status:** this remains a runbook, not a claim of a completed
+Compose demo. The current environment had no Docker executable and only
+Python 3.14.6 (CI targets Python 3.12). Compose YAML parsing and focused
+service tests were run, but Compose, Firestore emulator, and browser
+workflow were not executed here. The Playwright spec exists and a CI job is
+configured, but neither has been executed in this environment. The Compose stack uses the Firestore
+emulator, not Postgres, matching the repository's current Firestore data
+layer.
+
 ```
 python -m venv .venv && . .venv/bin/activate
 pip install -r module1-auth/requirements.txt -r module2-validation/requirements.txt \
   -r module3-fedlearning/requirements.txt -r module6-condition-router/requirements.txt \
   -r module7-admin/requirements.txt -r module8-synthesis/requirements.txt
-export FEDHEAL_ENV=development FEDHEAL_DATABASE_URL=sqlite:////tmp/fedheal.db \
+export FEDHEAL_ENV=development \
   FEDHEAL_DASHBOARD_ORIGIN=http://localhost:5173 FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD=demo-bootstrap-password-1
-(cd module1-auth && alembic upgrade head && python create_super_admin.py --email admin@demo.local)
+(cd module1-auth && python create_super_admin.py --email admin@demo.local)
 (cd module1-auth && uvicorn main:app --port 8001) &   (cd module2-validation && uvicorn main:app --port 8002) &
 (cd module7-admin && uvicorn main:app --port 8005) &  (cd module8-synthesis && uvicorn main:app --port 8006) &
 (cd module4-dashboard-react && npm ci && npm run dev) &
@@ -24,19 +33,50 @@ Services also need (development defaults exist for the signing keys; set real on
 4. **Vitals, history, scan.** Enter vitals (leave unknown fields blank — nothing is filled in), a history, and
    optionally a PNG/JPEG scan (stored and linked; the report will say analysis is unavailable).
 5. **Before any model is promoted:** *Run AI analysis* → `MODEL_UNAVAILABLE` (the demo fallback is off). This is correct.
-6. **Federation.** `cd module3-fedlearning && FEDHEAL_SEED_SUPER_ADMIN_EMAIL=admin@demo.local FEDHEAL_SEED_SUPER_ADMIN_PASSWORD=$FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD python seed_uci_heart.py --hospitals 2 && python simulate_real.py`
-   → two hospitals train locally on their own validated records; a CANDIDATE is registered (aggregates + weights only). It is **not** deployed.
-7. **Gate.** `POST /admin/models/{id}/validate` as super_admin. Under the **default policy** this public-data run is
-   **rejected** (see MODEL_STATUS.md) and `promote` returns 409. That is the honest result.
-8. **See promotion → inference.** Restart Module 7 with the *demo/test* policy used by the integration test
-   (`FEDHEAL_GATE_MIN_ACCURACY=0.5 FEDHEAL_GATE_MIN_EVAL_EXAMPLES=30 FEDHEAL_GATE_MAX_HOSPITAL_GAP=0.6 FEDHEAL_GATE_MIN_MARGIN_OVER_MAJORITY=0.0`),
-   re-run `simulate_real.py`, validate (passes), `POST /admin/models/{id}/promote`. These relaxed thresholds exist only to demonstrate
-   the wiring; they are not a claim that the model is good.
-9. **Analysis with the promoted model.** As the doctor, *Run AI analysis*: the report shows the promoted version, `federated`,
-   weights hash, round, 2 hospitals, "not clinically validated", the linear-contribution explanation, missing inputs and the safety banner.
-10. **Review.** Submit Accepted / Overridden / Needs more data with a note.
-11. **Isolation.** As Hospital B's doctor, request Hospital A's case id → 403 (see the audit log).
-12. **Rollback.** After a second promoted version exists, `POST /admin/models/rollback?model_name=vitals-fedavg-logreg&condition=heart_disease`.
+6. **Federated lifecycle verification (optional).** From the repository root,
+   run `python -m pytest -q tests/integration/test_federation_flow.py`. This
+   integration test starts throwaway real services, seeds public UCI records,
+   adds clearly marked synthetic records to cross a one-record test threshold,
+   and has hospital-scoped runners perform a networked Flower round. A
+   provenance-complete aggregate is registered as CANDIDATE; the test then
+   exercises the validation gate, explicit super-admin promotion, and
+   inference. Its relaxed test gate is for wiring verification only, not a
+   model-quality claim. Do not run `simulate_real.py`: central pooling of
+   hospital records is disabled by the privacy boundary.
+7. **Gate and promotion.** The integration test exercises these as separate
+   super-admin actions after candidate registration; the default gate is not
+   relaxed by normal runtime configuration, and retraining never promotes a
+   candidate automatically.
+8. **Analysis.** In the manual Compose walkthrough, keep the demo fallback
+   disabled unless deliberately enabling the labelled NON-CLINICAL public-data
+   model. A promoted federated model is served only after the validation gate
+   and explicit promotion; its response includes its version/status and
+   provenance.
+9. **Review.** Submit Accepted / Overridden / Needs more data with a note;
+   review decisions are not used as training labels.
+10. **Isolation.** As Hospital B's doctor, request Hospital A's case id → 403 (see the audit log).
+11. **Rollback.** After a second promoted version exists, `POST /admin/models/rollback?model_name=vitals-fedavg-logreg&condition=heart_disease`.
 
-Steps 5–9 are exactly what `tests/integration/test_federation_flow.py` automates against the real services.
-Docker Compose (`docker-compose.yml`, now with health checks and startup ordering) has **not** been run in this environment.
+The integration test uses throwaway local document stores; it is not a
+Compose/Firestore-emulator run. Docker Compose (`docker-compose.yml`, with
+health checks and startup ordering) has **not** been run here.
+The queue-triggered two-hospital integration test was executed locally and
+passed: 7 passed. It runs services and Flower clients as separate processes;
+it does not establish that the workflow works across Docker containers.
+
+## Browser E2E (synthetic, explicitly labelled demo analysis)
+
+The Playwright workflow in Module 4 requires the stack to be running and a
+super_admin to be provisioned. Set `FEDHEAL_E2E_SUPER_ADMIN_EMAIL` and
+`FEDHEAL_E2E_SUPER_ADMIN_PASSWORD`; `FEDHEAL_E2E_AUTH_API_URL` is optional
+and defaults to `http://localhost:8001`. To let the synthetic workflow reach
+analysis without a promoted model, configure the local stack with
+`FEDHEAL_ALLOW_DEMO_MODEL=true`. This deliberately enables only the labelled
+NON-CLINICAL demo model; do not use it for clinical or production data.
+
+From `module4-dashboard-react`, install dependencies and Chromium and run the
+test with `npm ci`, `npx playwright install chromium`, then
+`npm run test:e2e`. The repository CI `browser-e2e` job provisions
+development-only secrets and the Compose/Firestore emulator services before
+running this same browser flow. The CI workflow has been configured but not
+executed as part of this runbook verification.

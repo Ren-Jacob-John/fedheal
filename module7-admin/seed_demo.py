@@ -10,39 +10,32 @@ Then: uvicorn main:app --reload --port 8005   and hit /admin/overview
 (you'll still need a real super_admin JWT from Module 1 to call it — see
 this folder's README for the exact curl sequence).
 """
-from database import Base, SessionLocal, engine
+from database import repo
 from models import TrainingRound, ValidationFlag
-
-Base.metadata.create_all(bind=engine)
 
 
 def main():
-    db = SessionLocal()
-    try:
-        rounds = [
-            TrainingRound(round_number=i, n_hospitals=3,
-                          global_accuracy=0.70 + i * 0.015,
-                          baseline_accuracy=0.68,
-                          notes="seeded demo data")
-            for i in range(1, 6)
-        ]
-        db.add_all(rounds)
-
-        flags = [
-            ValidationFlag(hospital_id="demo-hospital-a", status="rejected",
-                            reason="height outside plausible range (0-272 cm)", count=2),
-            ValidationFlag(hospital_id="demo-hospital-a", status="flagged",
-                            reason="statistical outlier relative to batch (isolation forest)", count=5),
-            ValidationFlag(hospital_id="demo-hospital-b", status="rejected",
-                            reason="contains identifying field(s): patient_name", count=1),
-        ]
-        db.add_all(flags)
-
-        db.commit()
-        print(f"Seeded {len(rounds)} training rounds and {len(flags)} validation flag summaries "
-              f"into fedheal_admin.db")
-    finally:
-        db.close()
+    rounds = [
+        TrainingRound(round_number=i, n_hospitals=3,
+                      global_accuracy=0.70 + i * 0.015,
+                      baseline_accuracy=0.68,
+                      notes="seeded demo data")
+        for i in range(1, 6)
+    ]
+    flags = [
+        ValidationFlag(hospital_id="demo-hospital-a", status="rejected",
+                       reason="height outside plausible range (0-272 cm)", count=2),
+        ValidationFlag(hospital_id="demo-hospital-a", status="flagged",
+                       reason="statistical outlier relative to batch (isolation forest)", count=5),
+        ValidationFlag(hospital_id="demo-hospital-b", status="rejected",
+                       reason="contains identifying field(s): patient_name", count=1),
+    ]
+    for r in rounds:
+        repo.add_round(r)
+    for f in flags:
+        repo.add_flag(f)
+    print(f"Seeded {len(rounds)} training rounds and {len(flags)} validation flag summaries "
+          f"into the configured document store")
 
 
 if __name__ == "__main__":

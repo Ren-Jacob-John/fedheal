@@ -114,3 +114,8 @@ def require_model_candidate_credential(request: Request, x_service_key: str | No
 def require_promoted_model_read(request: Request, x_service_key: str | None = Header(default=None)) -> dict:
     return _verify_hop(request, x_service_key, key=M8_M7_SIGNING_KEY, caller="module8",
                        audiences={service_auth.AUD_PROMOTED_MODEL}, callers={"module8"})
+
+
+def require_retraining_runner(request: Request, x_service_key: str | None = Header(default=None)) -> dict:
+    return _verify_hop(request, x_service_key, key=M3_M7_SIGNING_KEY, caller="module3",
+                       audiences={"module7:retraining-runner"}, callers={"module3"})

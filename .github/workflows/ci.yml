@@ -38,3 +38,61 @@ jobs:
         with: {node-version: 20}
       - run: npm ci && npm run build
         working-directory: module4-dashboard-react
+  browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: module4-dashboard-react/package-lock.json
+      - name: Create ephemeral development-only Compose configuration
+        run: |
+          python - <<'PY'
+          import os
+          import secrets
+
+          password = secrets.token_urlsafe(32)
+          values = {
+              "FEDHEAL_ENV": "development",
+              "FEDHEAL_FIREBASE_PROJECT_ID": "demo-fedheal",
+              "FEDMED_JWT_SECRET": secrets.token_urlsafe(48),
+              "FEDHEAL_SVC_SIGNING_KEY_M3_M1": secrets.token_urlsafe(48),
+              "FEDHEAL_SVC_SIGNING_KEY_M1_M2": secrets.token_urlsafe(48),
+              "FEDHEAL_SVC_SIGNING_KEY_M2_M7": secrets.token_urlsafe(48),
+              "FEDHEAL_SVC_SIGNING_KEY_M3_M7": secrets.token_urlsafe(48),
+              "FEDHEAL_SVC_SIGNING_KEY_M8_M7": secrets.token_urlsafe(48),
+              "FEDHEAL_DASHBOARD_ORIGIN": "http://localhost:5173",
+              "FEDHEAL_ALLOW_DEMO_MODEL": "true",
+          }
+          with open(".env", "w", encoding="utf-8") as env_file:
+              env_file.writelines(f"{key}={value}\n" for key, value in values.items())
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as github_env:
+              github_env.write(f"FEDHEAL_E2E_SUPER_ADMIN_PASSWORD={password}\n")
+          PY
+      - name: Start the local Compose stack
+        run: docker compose up --build --detach --wait --wait-timeout 300
+      - name: Bootstrap a temporary platform administrator
+        run: |
+          docker compose exec -T \
+            -e "FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD=$FEDHEAL_E2E_SUPER_ADMIN_PASSWORD" \
+            auth python create_super_admin.py --email pw-e2e-admin@fedheal.test
+      - name: Install dashboard and browser dependencies
+        working-directory: module4-dashboard-react
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Run browser workflow
+        working-directory: module4-dashboard-react
+        env:
+          FEDHEAL_E2E_SUPER_ADMIN_EMAIL: pw-e2e-admin@fedheal.test
+          FEDHEAL_E2E_AUTH_API_URL: http://localhost:8001
+        run: |
+          FEDHEAL_E2E_SUPER_ADMIN_PASSWORD="$FEDHEAL_E2E_SUPER_ADMIN_PASSWORD" npm run test:e2e
+      - name: Stop the Compose stack
+        if: always()
+        run: docker compose down --remove-orphans

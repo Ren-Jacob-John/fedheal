@@ -132,26 +132,26 @@ def build_registry(fitted_vitals_model=None) -> dict[str, list]:
     else:
         registry["vitals"] = [XGBoostVitalsModel()]
 
-    # --- Imaging specialists: current-tier foundation model first (index 0 —
-    # what MetadataRouter.route() actually picks, per router.py's own comment
-    # that candidates[0] is "the simplest case: one specialist per modality"),
-    # legacy ImageNet-pretrained architecture as the registered fallback for
-    # low-resource/no-GPU/no-HF-access hospital deployments (per the catalog's
-    # own guidance: "Keep as the ... fallback tier, not the primary path"),
-    # StubSpecialistModel only if NEITHER real dependency chain is available.
+    # --- Imaging specialists are made selectable only with explicit
+    # validated weights and dataset/license provenance. Architectures and
+    # pretrained encoders alone are not task-validated clinical models.
     def _build_imaging_candidates(biomedclip_ctor, legacy_ctor, stub_id, stub_modality,
                                    stub_task, stub_classes, legacy_model_name):
         candidates = []
-        if BIOMEDCLIP_IMPORT_OK:
+        for ctor in (biomedclip_ctor, legacy_ctor):
+            if ctor is None or getattr(ctor, "training_status", None) != "validated":
+                continue
+            provenance = getattr(ctor, "dataset_provenance", None)
+            if not isinstance(provenance, dict) or not all(
+                provenance.get(key) for key in ("dataset", "license", "weights_sha256")
+            ):
+                continue
             try:
-                candidates.append(biomedclip_ctor())
+                model = ctor()
             except (ImportError, OSError):
-                pass  # BiomedCLIP's own deps/network access missing — fall through to legacy
-        if IMAGING_IMPORTS_OK:
-            try:
-                candidates.append(legacy_ctor())
-            except (ImportError, OSError):
-                pass
+                continue
+            if model.is_available():
+                candidates.append(model)
         if not candidates:
             candidates.append(StubSpecialistModel(stub_id, stub_modality, stub_task, stub_classes, legacy_model_name))
         return candidates
@@ -172,24 +172,28 @@ def build_registry(fitted_vitals_model=None) -> dict[str, list]:
         "skin", "skin", "classification", SKIN_CLASSES, "EfficientNetSkinLesionModel",
     )
 
-    # --- Segmentation: nnU-Net (current, needs real labeled training data +
-    # a trained model folder — see foundation_nnunet.py) first, custom U-Net
-    # as the no-training-required fallback, stub if neither is available.
+    # --- Segmentation is also unavailable until a candidate declares
+    # validated weights and dataset/license provenance.
     # For prompted/volumetric segmentation without a per-task labeled
     # dataset, see the separately-registered `prompted_segmentation` /
     # `ct_volumetric` modalities below (BiomedParse / SegVol) instead — this
     # ct_scan slot specifically covers the "we have real labels" branch.
     ct_scan_candidates = []
-    if NNUNET_IMPORT_OK:
+    for ctor in (NNUNetSegmentationModel if NNUNET_IMPORT_OK else None,
+                 UNetSegmentationModel if IMAGING_IMPORTS_OK else None):
+        if ctor is None or getattr(ctor, "training_status", None) != "validated":
+            continue
+        provenance = getattr(ctor, "dataset_provenance", None)
+        if not isinstance(provenance, dict) or not all(
+            provenance.get(key) for key in ("dataset", "license", "weights_sha256")
+        ):
+            continue
         try:
-            ct_scan_candidates.append(NNUNetSegmentationModel())
+            model = ctor()
         except (ImportError, OSError):
-            pass
-    if IMAGING_IMPORTS_OK:
-        try:
-            ct_scan_candidates.append(UNetSegmentationModel())
-        except (ImportError, OSError):
-            pass
+            continue
+        if model.is_available():
+            ct_scan_candidates.append(model)
     if not ct_scan_candidates:
         ct_scan_candidates.append(StubSpecialistModel(
             "ct-scan", "ct_scan", "segmentation", ["region_flagged", "no_region_flagged"], "UNetSegmentationModel"))

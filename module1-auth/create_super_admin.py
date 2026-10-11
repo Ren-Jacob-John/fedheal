@@ -7,9 +7,10 @@ path for that — POST /register only ever makes clinicians, and POST
     # password is read from a hidden prompt, or from
     # FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD for non-interactive provisioning.
 
-Run it on the machine that has the production database credentials
-(FEDHEAL_DATABASE_URL). The password is never printed or logged; nothing is
-written if the e-mail already exists.
+Run it somewhere that has the production Firestore credentials
+(FEDHEAL_FIREBASE_PROJECT_ID + GOOGLE_APPLICATION_CREDENTIALS, or an attached
+service account). The password is never printed or logged; nothing is written
+if the e-mail already exists.
 """
 import argparse
 import getpass
@@ -18,7 +19,8 @@ import sys
 
 import auth
 import models
-from database import SessionLocal
+from database import repo
+from repo import DuplicateError
 
 MIN_PASSWORD_LENGTH = 12
 
@@ -33,20 +35,19 @@ def main() -> int:
         print(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.", file=sys.stderr)
         return 2
 
-    db = SessionLocal()
+    if repo.get_user_by_email(args.email):
+        print("A user with that e-mail already exists; nothing changed.", file=sys.stderr)
+        return 1
     try:
-        if db.query(models.User).filter(models.User.email == args.email).first():
-            print("A user with that e-mail already exists; nothing changed.", file=sys.stderr)
-            return 1
-        db.add(models.User(
+        repo.create_user(models.User(
             email=args.email,
             hashed_password=auth.hash_password(password),
             role=models.Role.SUPER_ADMIN,
             hospital_id=None,
         ))
-        db.commit()
-    finally:
-        db.close()
+    except DuplicateError:
+        print("A user with that e-mail already exists; nothing changed.", file=sys.stderr)
+        return 1
     print("super_admin created.")
     return 0
 

@@ -22,7 +22,7 @@ GOOD = {
     "FEDHEAL_SVC_SIGNING_KEY_M3_M1": "Rt5Yq8LmZc2VbNw7XeJk4HdSa9PfGu3T",
     "FEDHEAL_SVC_SIGNING_KEY_M1_M2": "Bn6Wz1QxCv8LkMj3RtYh5GfDs2AoPe9U",
     "FEDHEAL_DASHBOARD_ORIGIN": "https://dashboard.example-hospital.org",
-    "FEDHEAL_DATABASE_URL": "sqlite:///./_test_config_unused.db",
+    "FEDHEAL_FIREBASE_PROJECT_ID": "fedheal-config-test",
 }
 
 
@@ -80,6 +80,27 @@ class TestHostedTiers:
         assert r.stdout.strip() == "True"
 
 
+class TestDatabaseBackend:
+    def test_production_requires_a_firebase_project(self):
+        env = prod()
+        env.pop("FEDHEAL_FIREBASE_PROJECT_ID")
+        r = run("module1-auth", IMPORT_M1, env)
+        assert r.returncode != 0 and "FEDHEAL_FIREBASE_PROJECT_ID" in r.stderr
+
+    @pytest.mark.parametrize("backend", ["local", "memory"])
+    def test_local_stores_are_refused_in_production(self, backend):
+        r = run("module1-auth", IMPORT_M1, prod(FEDHEAL_DB_BACKEND=backend))
+        assert r.returncode != 0 and "FEDHEAL_DB_BACKEND" in r.stderr
+
+    def test_emulator_is_refused_in_production(self):
+        r = run("module1-auth", IMPORT_M1, prod(FIRESTORE_EMULATOR_HOST="localhost:8080"))
+        assert r.returncode != 0 and "FIRESTORE_EMULATOR_HOST" in r.stderr
+
+    def test_unknown_backend_name_refused(self):
+        r = run("module1-auth", IMPORT_M1, {"FEDHEAL_ENV": "development", "FEDHEAL_DB_BACKEND": "postgres"})
+        assert r.returncode != 0 and "FEDHEAL_DB_BACKEND" in r.stderr
+
+
 def test_unset_environment_is_treated_as_production():
     env = {k: v for k, v in GOOD.items() if k != "FEDMED_JWT_SECRET"}
     r = run("module1-auth", IMPORT_M1, env)  # FEDHEAL_ENV not set at all
@@ -94,14 +115,14 @@ def test_unknown_environment_name_refused():
 class TestDevelopment:
     def test_starts_with_fallbacks_and_warns_by_name_only(self):
         r = run("module1-auth", "import main", {"FEDHEAL_ENV": "development",
-                                                "FEDHEAL_DATABASE_URL": GOOD["FEDHEAL_DATABASE_URL"]})
+                                                "FEDHEAL_DB_BACKEND": "memory"})
         assert r.returncode == 0, r.stderr[-800:]
         assert "FEDMED_JWT_SECRET" in r.stderr and "DEVELOPMENT-ONLY" in r.stderr
         assert "dev-only-change-me" not in r.stderr.split("DEVELOPMENT-ONLY")[0].splitlines()[-1]  # warning names the variable, not the value
 
     def test_dev_cookie_not_secure_by_default(self):
         r = run("module1-auth", "import main; print(main.COOKIE_SECURE)",
-                {"FEDHEAL_ENV": "development", "FEDHEAL_DATABASE_URL": GOOD["FEDHEAL_DATABASE_URL"]})
+                {"FEDHEAL_ENV": "development", "FEDHEAL_DB_BACKEND": "memory"})
         assert r.stdout.strip() == "False"
 
 
@@ -117,7 +138,7 @@ def test_other_services_fail_fast_in_production(module, code, keys):
             "FEDHEAL_SVC_SIGNING_KEY_M2_M7": "Zx3Cv7BnMq1WeRt5YuIo9PaSd2FgHj4K",
             "FEDHEAL_SVC_SIGNING_KEY_M3_M7": "Lk8Jh2GfDs6AqWe1RtYu4IoPz9XcVb3N",
             "FEDHEAL_SVC_SIGNING_KEY_M8_M7": "Qp5Rt8WnBv2XcZm4LkJh7GfDs1AaSd3F",
-            "FEDHEAL_ADMIN_DATABASE_URL": "sqlite:////tmp/fedheal_cfg_test_admin.db"}
+            "FEDHEAL_FIREBASE_PROJECT_ID": "fedheal-config-test"}
     assert run(module, code, base).returncode == 0
     for key in keys:
         env = dict(base)

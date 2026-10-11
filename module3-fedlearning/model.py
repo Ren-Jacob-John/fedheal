@@ -19,12 +19,14 @@ from data import N_FEATURES
 N_CLASSES = 2
 
 
-def build_model() -> SGDClassifier:
+def build_model(n_features: int = N_FEATURES) -> SGDClassifier:
     model = SGDClassifier(loss="log_loss", max_iter=1, warm_start=True, random_state=42)
     # SGDClassifier needs coef_/intercept_ to exist before we can set them
     # externally, so seed it with one partial_fit call on dummy balanced data.
     model.classes_ = np.array([0, 1])
-    model.coef_ = np.zeros((1, N_FEATURES))
+    if not 1 <= n_features <= 64:
+        raise ValueError(f"n_features must be between 1 and 64 (got {n_features})")
+    model.coef_ = np.zeros((1, n_features))
     model.intercept_ = np.zeros(1)
     return model
 

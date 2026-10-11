@@ -24,7 +24,7 @@ import traceback
 import numpy as np
 
 import uci_heart
-from real_data import _FEATURE_MEAN, _record_to_features, FEATURE_KEYS
+from real_data import _FEATURE_MEAN, _record_to_features, FEATURE_KEYS, feature_transform
 
 
 def test_dataset_integrity():
@@ -70,6 +70,26 @@ def test_every_record_has_a_real_label():
     assert len(records) == uci_heart.EXPECTED_ROWS
     assert all(r["label"] in (0, 1) for r in records)
     assert not [r for r in records if r.get("label") is None]
+
+
+def test_missing_model_inputs_are_rejected_not_zero_filled():
+    record = uci_heart.load_vitals_records()[0]
+    record.pop("age_years")
+    try:
+        _record_to_features(record)
+    except ValueError as exc:
+        assert "age_years" in str(exc)
+    else:
+        raise AssertionError("missing training features must not be imputed")
+
+
+def test_optional_vitals_training_schema_is_unavailable_without_sourced_transform():
+    try:
+        feature_transform("v2")
+    except ValueError as exc:
+        assert "traceable" in str(exc)
+    else:
+        raise AssertionError("v2 transform must stay gated until source metadata exists")
 
 
 def test_unsupplied_fields_normalize_to_zero():

@@ -317,7 +317,7 @@ def main() -> int:
         print("Non-zero rejections from a known-clean public dataset is a red flag; "
               "check the reasons above before trusting any accuracy number from this seed.")
     print("\nNext: run the federated-vs-solo comparison on it —")
-    print("  python simulate_real.py")
+    print("  python -m pytest -q tests/integration/test_federation_flow.py")
     print("...or offline, with no services running —")
     print("  python compare_uci_heart.py")
     return 0
