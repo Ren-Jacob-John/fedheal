@@ -1,7 +1,9 @@
 # Local env files with real secrets — never commit these
 .env
 module1-auth/.env
+module2-validation/.env
 module7-admin/.env
+module8-synthesis/.env
 
 # Local development document stores (FEDHEAL_DB_BACKEND=local) and their lock/temp files
 *_store.json
