@@ -21,6 +21,18 @@ body {
   overflow: hidden; /* the map is the page — panels scroll internally */
 }
 
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image: linear-gradient(rgba(127, 216, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(127, 216, 255, 0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, black, transparent 76%);
+}
+
 h1,
 h2,
 h3 {
@@ -44,6 +56,17 @@ button {
   cursor: pointer;
   background: none;
   border: none;
+}
+
+input,
+textarea,
+select {
+  color-scheme: dark;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-faint);
 }
 
 :focus-visible {

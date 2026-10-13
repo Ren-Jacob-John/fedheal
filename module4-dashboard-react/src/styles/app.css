@@ -29,7 +29,8 @@
   letter-spacing: 0.01em;
   padding: 11px 18px;
   border-radius: var(--radius-sm);
-  transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+  border: 1px solid transparent;
+  transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .btn:active {
   transform: scale(0.98);
@@ -44,6 +45,7 @@
 }
 .btn--primary:hover:not(:disabled) {
   filter: brightness(1.08);
+  box-shadow: 0 0 0 4px rgba(45, 217, 196, 0.1), 0 8px 24px rgba(45, 217, 196, 0.18);
 }
 .btn--ghost {
   background: transparent;
@@ -73,12 +75,18 @@
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  padding: 12px 13px;
   font-size: 14px;
   color: var(--ink);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
-.field input:focus {
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
   border-color: var(--teal);
+  background: rgba(45, 217, 196, 0.06);
+  box-shadow: 0 0 0 3px rgba(45, 217, 196, 0.1);
+  outline: none;
 }
 
 .c-teal {
@@ -169,15 +177,20 @@
   z-index: 5;
   display: flex;
   align-items: flex-start;
-  gap: var(--space-3);
+  gap: 10px;
   flex-wrap: wrap;
+  pointer-events: none;
+}
+.hud > * {
+  pointer-events: auto;
 }
 
 .hud__brand {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 10px 16px;
+  padding: 11px 16px;
+  min-height: 54px;
 }
 .hud__brand-dot {
   width: 10px;
@@ -195,17 +208,38 @@
   display: flex;
   padding: 4px;
   gap: 2px;
+  min-height: 54px;
 }
 .hud__tabs button {
-  padding: 8px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px;
   border-radius: var(--radius-sm);
   font-size: 12.5px;
   font-family: var(--font-display);
   font-weight: 500;
   color: var(--ink-dim);
+  transition: color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+.hud__tabs button:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.05);
+}
+.hud__tabs button:active {
+  transform: translateY(1px);
+}
+.hud__tab-icon {
+  color: var(--ink-faint);
+  font-size: 14px;
+  line-height: 1;
 }
 .hud__tabs button.is-active {
   background: rgba(45, 217, 196, 0.14);
+  color: var(--teal);
+  box-shadow: inset 0 0 0 1px rgba(45, 217, 196, 0.18);
+}
+.hud__tabs button.is-active .hud__tab-icon {
   color: var(--teal);
 }
 
@@ -215,6 +249,7 @@
   gap: var(--space-4);
   padding: 10px 20px;
   flex: 1 1 320px;
+  min-height: 54px;
 }
 .hud__stat-value {
   font-family: var(--font-mono);
@@ -246,6 +281,8 @@
 }
 .hud__icon-btn:hover {
   color: var(--teal);
+  border-color: rgba(45, 217, 196, 0.35);
+  background: rgba(45, 217, 196, 0.08);
 }
 .hud__spin {
   display: inline-block;
@@ -482,6 +519,7 @@
   padding: var(--space-5);
   overflow-y: auto;
   animation: drift-in 0.2s ease both;
+  scrollbar-gutter: stable;
 }
 
 .drawer__close {
@@ -743,6 +781,12 @@
   width: 190px;
   padding: var(--space-3) var(--space-4);
   border-top: 2px solid var(--node-color);
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.system-map__node:hover {
+  transform: translate(-50%, -50%) translateY(-4px);
+  border-color: var(--core-halo);
+  background: rgba(22, 37, 61, 0.88);
 }
 .system-map__node-n {
   font-size: 10px;
@@ -953,9 +997,21 @@
 
 @media (max-width: 860px) {
   .hud {
-    position: static;
-    flex-direction: column;
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 12px;
+    background: linear-gradient(to bottom, rgba(6, 11, 20, 0.96), rgba(6, 11, 20, 0.72), transparent);
+    flex-direction: row;
+    align-items: stretch;
+    gap: 8px;
   }
+  .hud__brand { flex: 1; }
+  .hud__tabs { order: 3; width: 100%; overflow-x: auto; justify-content: flex-start; }
+  .hud__tabs button { flex: 1 0 auto; justify-content: center; }
+  .hud__stats { display: none; }
+  .hud__actions { margin-left: 0; }
   .app {
     overflow-y: auto;
     height: auto;
@@ -975,6 +1031,8 @@
     width: auto;
     left: var(--space-3);
     right: var(--space-3);
+    top: 88px;
+    bottom: var(--space-3);
   }
   .system-map {
     position: static;
@@ -988,6 +1046,28 @@
   .synth-form__grid {
     grid-template-columns: 1fr;
   }
+  .cases { padding: 92px 12px 24px; }
+}
+
+@media (max-width: 1100px) and (min-width: 861px) {
+  .hud__stats {
+    order: 3;
+    flex-basis: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .hud__brand {
+    padding: 9px 11px;
+  }
+  .hud__brand-title { font-size: 15px; }
+  .hud__brand .eyebrow { font-size: 9px; }
+  .hud__actions { gap: 5px; }
+  .hud__icon-btn { width: 38px; height: 38px; }
+  .hud__tabs button { padding: 9px 11px; font-size: 11px; }
+  .hud__tab-icon { display: none; }
+  .rail { margin: 12px; }
+  .cases__panel { padding: 16px; }
 }
 
 /* --- Synthesis view: model status / warnings (integration pass) --- */
@@ -1022,16 +1102,21 @@
 .synth-inputs td { padding: 4px 8px 4px 0; }
 
 /* ---- Cases / doctor workflow ---- */
-.cases { padding: 96px 20px 32px; max-width: 1100px; margin: 0 auto; display: grid; gap: 16px; }
+.cases { padding: 104px 20px 32px; max-width: 1180px; margin: 0 auto; display: grid; gap: 16px; height: 100%; overflow-y: auto; }
 .cases__layout { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px; }
 @media (max-width: 760px) { .cases__layout { grid-template-columns: 1fr; } }
-.cases__panel { padding: 16px; border-radius: 14px; }
+.cases__panel { padding: 20px; border-radius: 16px; }
+.cases__panel h2 { font-size: 20px; letter-spacing: -0.02em; margin-bottom: 16px; }
+.cases__panel h3 { font-size: 15px; margin-bottom: 8px; }
 .cases__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.cases__list button { width: 100%; text-align: left; padding: 10px; border-radius: 10px; cursor: pointer; }
-.cases__list button[aria-current="true"] { outline: 2px solid currentColor; }
+.cases__list button { width: 100%; text-align: left; padding: 12px; border: 1px solid transparent; border-radius: 10px; cursor: pointer; color: var(--ink-dim); background: rgba(255, 255, 255, 0.025); transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+.cases__list button:hover { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
+.cases__list button[aria-current="true"] { color: var(--teal); border-color: rgba(45, 217, 196, 0.35); background: rgba(45, 217, 196, 0.09); }
 .cases__form { display: grid; gap: 10px; }
-.cases__form label { display: grid; gap: 4px; font-size: 0.85rem; }
-.cases__form input, .cases__form textarea, .cases__form select { padding: 8px; border-radius: 8px; font: inherit; }
+.cases__form label { display: grid; gap: 6px; font-size: 0.82rem; color: var(--ink-dim); }
+.cases__form input, .cases__form textarea, .cases__form select { width: 100%; padding: 11px 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: rgba(255, 255, 255, 0.04); font: inherit; transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease; }
+.cases__form textarea { min-height: 84px; resize: vertical; }
+.cases__form input:focus, .cases__form textarea:focus, .cases__form select:focus { border-color: var(--teal); background: rgba(45, 217, 196, 0.06); box-shadow: 0 0 0 3px rgba(45, 217, 196, 0.1); outline: none; }
 .cases__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .cases__error { color: #ff8a8a; font-size: 0.9rem; }
 .cases__ok { color: #6fe3b0; font-size: 0.9rem; }

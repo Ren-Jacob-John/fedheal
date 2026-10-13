@@ -1,6 +1,6 @@
 export default function TopHUD({ me, overview, view, onSetView, onLogout, onRefresh, refreshing }) {
   return (
-    <div className="hud">
+    <header className="hud">
       <div className="hud__brand glass">
         <span className="hud__brand-dot" aria-hidden="true" />
         <div>
@@ -13,18 +13,22 @@ export default function TopHUD({ me, overview, view, onSetView, onLogout, onRefr
       </div>
 
       <nav className="hud__tabs glass" aria-label="View">
-        <button className={view === "map" ? "is-active" : ""} onClick={() => onSetView("map")}>
+        <button aria-current={view === "map" ? "page" : undefined} className={view === "map" ? "is-active" : ""} onClick={() => onSetView("map")}>
+          <span className="hud__tab-icon" aria-hidden="true">◉</span>
           Federation
         </button>
-        <button className={view === "system" ? "is-active" : ""} onClick={() => onSetView("system")}>
+        <button aria-current={view === "system" ? "page" : undefined} className={view === "system" ? "is-active" : ""} onClick={() => onSetView("system")}>
+          <span className="hud__tab-icon" aria-hidden="true">⌘</span>
           Architecture
         </button>
         {me.role !== "super_admin" && (
-          <button className={view === "cases" ? "is-active" : ""} onClick={() => onSetView("cases")}>
+          <button aria-current={view === "cases" ? "page" : undefined} className={view === "cases" ? "is-active" : ""} onClick={() => onSetView("cases")}>
+            <span className="hud__tab-icon" aria-hidden="true">＋</span>
             {me.role === "hospital_admin" ? "Doctors" : "Cases"}
           </button>
         )}
-        <button className={view === "synthesis" ? "is-active" : ""} onClick={() => onSetView("synthesis")}>
+        <button aria-current={view === "synthesis" ? "page" : undefined} className={view === "synthesis" ? "is-active" : ""} onClick={() => onSetView("synthesis")}>
+          <span className="hud__tab-icon" aria-hidden="true">✦</span>
           Synthesis
         </button>
       </nav>
@@ -74,6 +78,6 @@ export default function TopHUD({ me, overview, view, onSetView, onLogout, onRefr
           ⏻
         </button>
       </div>
-    </div>
+    </header>
   );
 }
