@@ -45,26 +45,49 @@ export default function App() {
     if (!silent) setRefreshing(true);
     try {
       const [hospitalsRes, statusRes] = await Promise.all([
-        authApi.hospitals(),
+        authApi.hospitals(tok),
         authApi.trainingStatus(tok),
       ]);
       setHospitals(hospitalsRes);
       setTrainingStatus(statusRes);
 
       if (role === "super_admin") {
-        const [ov, rd, requests, models] = await Promise.all([
+        const adminResults = await Promise.allSettled([
           adminApi.overview(tok),
           adminApi.rounds(tok),
           adminApi.retrainingRequests(tok),
           adminApi.models(tok),
         ]);
-        setOverview(ov);
-        if (roundsRef.current[0]?.id !== rd[0]?.id && rd[0]) {
-          setPulseSignal((signal) => signal + 1);
+
+        const [overviewResult, roundsResult, requestsResult, modelsResult] = adminResults;
+        if (overviewResult.status === "fulfilled") {
+          setOverview(overviewResult.value);
         }
-        setRounds(rd);
-        setRetrainingRequests(requests);
-        setModelVersions(models);
+        if (roundsResult.status === "fulfilled") {
+          const rd = roundsResult.value;
+          if (roundsRef.current[0]?.id !== rd[0]?.id && rd[0]) {
+            setPulseSignal((signal) => signal + 1);
+          }
+          setRounds(rd);
+        }
+        if (requestsResult.status === "fulfilled") {
+          setRetrainingRequests(requestsResult.value);
+        }
+        if (modelsResult.status === "fulfilled") {
+          setModelVersions(modelsResult.value);
+        }
+
+        const failedAdminResult = adminResults.find((result) => result.status === "rejected");
+        if (failedAdminResult) {
+          const reason = failedAdminResult.reason;
+          throw new ApiError(
+            reason instanceof ApiError
+              ? `Admin service refresh failed: ${reason.message}`
+              : "Admin service refresh failed. Check that Module 7 is running.",
+            reason instanceof ApiError ? reason.status : 0,
+            reason instanceof ApiError ? reason.detail : null
+          );
+        }
       }
       setLoadError(null);
     } catch (err) {
@@ -150,7 +173,7 @@ export default function App() {
   async function handleSetHospitalActive(hospitalId, isActive) {
     try {
       await adminApi.setHospitalStatus(token, hospitalId, isActive);
-      const hospitalsRes = await authApi.hospitals();
+      const hospitalsRes = await authApi.hospitals(token);
       setHospitals(hospitalsRes);
     } catch (err) {
       setLoadError(err instanceof ApiError ? err.message : "Couldn't update that hospital.");

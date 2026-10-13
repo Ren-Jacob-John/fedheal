@@ -114,8 +114,8 @@ export const authApi = {
   // httpOnly cookie is sent by request()); anonymous callers get 401. Only
   // name/id/is_active/requires_label per hospital, which is exactly what
   // the map needs to place a node for every hospital in the federation.
-  hospitals() {
-    return request(AUTH_API_BASE, "/hospitals");
+  hospitals(token) {
+    return request(AUTH_API_BASE, "/hospitals", { token });
   },
 
   // super_admin gets { [hospitalId]: status }; anyone else gets one status
