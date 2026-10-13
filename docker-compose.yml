@@ -83,6 +83,9 @@ services:
     environment:
       FEDHEAL_AUTH_API_URL: http://auth:8001
       FEDHEAL_ADMIN_API_URL: http://admin:8005     # where the PROMOTED model is read from
+      # Local development may opt into the clearly-labelled UCI demo fallback.
+      # Staging/production should leave this false and serve only promoted models.
+      FEDHEAL_ALLOW_DEMO_MODEL: ${FEDHEAL_ALLOW_DEMO_MODEL:-false}
     depends_on:
       auth: {condition: service_healthy}
       admin: {condition: service_healthy}

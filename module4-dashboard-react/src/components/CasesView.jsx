@@ -27,7 +27,9 @@ function explainError(e) {
     if (e.status === 401) return "Your session has expired. Please log in again.";
     if (e.status === 403) return "You are not permitted to access this resource.";
     if (e.code === "INSUFFICIENT_DATA") return `Insufficient data: ${e.message}`;
-    if (e.code === "MODEL_UNAVAILABLE") return `Model unavailable: ${e.message}`;
+    if (e.code === "MODEL_UNAVAILABLE") {
+      return `Model unavailable: ${e.message} For local development, set FEDHEAL_ALLOW_DEMO_MODEL=true and recreate the synthesis service.`;
+    }
     return e.message;
   }
   return "Something went wrong.";
