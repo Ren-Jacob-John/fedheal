@@ -36,8 +36,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "server/condition-router"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "server/model-zoo"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "condition-router"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "model-zoo"))
 
 from condition_router import (  # noqa: E402
     ConditionRouter, IncompleteDataError, SpecialistUnavailableError, UnknownConditionError,

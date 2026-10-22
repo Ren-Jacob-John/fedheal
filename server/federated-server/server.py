@@ -17,12 +17,17 @@ client-certificate mTLS.
 """
 import argparse
 from pathlib import Path
+import sys
 from typing import List, Tuple
 
 import flwr as fl
 import numpy as np
 from flwr.common import Metrics
 from flwr.server.client_proxy import ClientProxy
+
+_HOSPITAL_NODE_DIR = str(Path(__file__).resolve().parents[2] / "hospital-node")
+if _HOSPITAL_NODE_DIR not in sys.path:
+    sys.path.insert(0, _HOSPITAL_NODE_DIR)
 
 import federation_registry
 from model import build_model, get_model_parameters

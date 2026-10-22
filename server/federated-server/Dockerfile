@@ -8,6 +8,7 @@ RUN useradd --create-home --uid 10001 app
 WORKDIR /srv/server/federated-server
 COPY server/federated-server/requirements.txt ./
 RUN HTTPS_PROXY= HTTP_PROXY= https_proxy= http_proxy= NO_PROXY= no_proxy= pip install --no-cache-dir --use-deprecated=legacy-certs --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements.txt
+COPY hospital-node/ /srv/hospital-node/
 COPY server/federated-server/ ./
 USER app
 EXPOSE 8080

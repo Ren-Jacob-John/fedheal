@@ -13,7 +13,14 @@ networked path (`server.py` / `client_runner.py`) uses Flower's own
 aggregate() instead — `test_client_runner_matches_simulation.py` is the
 check that those two agree.
 """
+import sys
+from pathlib import Path
+
 import numpy as np
+
+_HOSPITAL_NODE_DIR = str(Path(__file__).resolve().parents[2] / "hospital-node")
+if _HOSPITAL_NODE_DIR not in sys.path:
+    sys.path.insert(0, _HOSPITAL_NODE_DIR)
 
 from model import build_model
 

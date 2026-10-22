@@ -13,8 +13,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "server/condition-router"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "server/model-zoo"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "condition-router"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "model-zoo"))
 
 from condition_router import ConditionReport  # noqa: E402
 from fusion import FusedAssessment  # noqa: E402
