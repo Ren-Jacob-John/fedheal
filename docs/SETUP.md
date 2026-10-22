@@ -1,0 +1,98 @@
+# Local setup
+
+The commands below use placeholders for secrets. Do not copy real credentials
+into documentation or source control.
+
+## Prerequisites
+
+- Python version required by the repository documentation: Python 3.11+.
+  The verification environment used Python 3.12.10.
+- Node.js 18+ and npm for Module 4. Verification used Node.js v24.12.0 and
+  npm 11.11.0.
+- Optional Docker/Compose and Firebase CLI for emulator workflows.
+
+## Windows PowerShell
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+$env:FEDHEAL_ENV = "development"
+python -m pip install -r module1-auth\requirements.txt
+python -m pip install -r module2-validation\requirements.txt
+python -m pip install -r module3-fedlearning\requirements.txt
+python -m pip install -r module5-modelzoo\requirements.txt
+python -m pip install -r module6-condition-router\requirements.txt
+python -m pip install -r module7-admin\requirements.txt
+python -m pip install -r module8-synthesis\requirements.txt
+Copy-Item deploy\compose.env.example .env
+```
+
+For separate services, copy each module's `.env.example` to `.env` in that
+module and replace placeholders with matching values. At minimum, set a
+development environment, dashboard origin, JWT secret, and the signing keys
+needed by each caller/provider pair. The examples use local defaults and are
+not production secrets.
+
+Create the first super admin:
+
+```powershell
+python module1-auth\create_super_admin.py --email admin@example.invalid
+```
+
+The script reads the configured bootstrap password/environment as implemented
+by the module. If no documented bootstrap password is configured, inspect the
+script's required arguments before running it; this task did not execute
+service startup or account creation.
+
+Start services in separate PowerShell windows:
+
+```powershell
+python -m uvicorn main:app --app-dir module1-auth --port 8001
+python -m uvicorn main:app --app-dir module2-validation --port 8002
+python -m uvicorn main:app --app-dir module7-admin --port 8005
+python -m uvicorn main:app --app-dir module8-synthesis --port 8006
+npm --prefix module4-dashboard-react install
+npm --prefix module4-dashboard-react run dev
+```
+
+The dashboard defaults to `http://localhost:5173`. Module 3's Flower server
+uses port 8080 in Compose; its server/client scripts must be started only
+after the required Module 1/7 service tokens and eligible data exist.
+
+## Linux/macOS
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+export FEDHEAL_ENV=development
+for m in module1-auth module2-validation module3-fedlearning module5-modelzoo module6-condition-router module7-admin module8-synthesis; do
+  python -m pip install -r "$m/requirements.txt"
+done
+cp deploy/compose.env.example .env
+```
+
+Copy each module `.env.example` to its local `.env`, then use the same
+`uvicorn`, `create_super_admin.py`, and `npm` commands shown above with
+forward-slash paths.
+
+## Docker Compose
+
+At the repository root:
+
+```bash
+cp deploy/compose.env.example .env
+# replace every CHANGE_ME value with a generated placeholder-safe secret
+docker compose config
+docker compose up --build
+```
+
+Compose starts the Firestore emulator, Modules 1, 2, 7, and 8, and the
+dashboard. Module 3 is behind the `federation` profile:
+
+```bash
+docker compose --profile federation up --build
+```
+
+The current verification could not validate Compose because root `.env` was
+absent; Docker runtime was not run. The Compose file itself states that the
+Firestore emulator is in-memory and data is lost when it stops.
