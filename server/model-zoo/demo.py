@@ -23,7 +23,7 @@ from router import MetadataRouter
 def make_synthetic_vitals_model() -> XGBoostVitalsModel:
     """
     Quick local fit so the vitals specialist is real and usable in this demo
-    — same synthetic-data idea as module3-fedlearning's simulation, kept
+    — same synthetic-data idea as hospital-node's simulation, kept
     independent here since this module's job is proving the ROUTER works,
     not re-deriving the federated training loop.
     """

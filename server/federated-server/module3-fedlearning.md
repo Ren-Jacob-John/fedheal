@@ -93,7 +93,7 @@ set no single hospital trained or tested on — the fair comparison of
 ## How to run it
 
 ```bash
-cd module3-fedlearning
+cd hospital-node
 pip install -r requirements.txt
 
 # Verify the vendored UCI Heart Disease dataset:

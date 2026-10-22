@@ -63,7 +63,7 @@ class XGBoostVitalsModel(SpecialistModel):
         if not self._is_fitted:
             raise RuntimeError(
                 f"{self.name}: called predict() before fit() — train on a "
-                "hospital's local data first (see module3-fedlearning for the "
+                "hospital's local data first (see hospital-node for the "
                 "federated version of this same idea)."
             )
         features = np.array(case["features"], dtype=float).reshape(1, -1)

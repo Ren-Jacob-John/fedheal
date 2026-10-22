@@ -14,6 +14,13 @@ treatment system. Scan analysis is currently an explicit unavailable response.
 The optional UCI Cleveland model is a non-clinical demo fallback and is not a
 federated hospital model.
 
+## Repository layout
+
+User-facing code lives under `client/dashboard`. HTTP services and backend
+libraries live under `server/`, the central Flower process is under
+`server/federated-server`, and hospital-local federated code plus demo data
+lives under `hospital-node`. Deployment configuration is under `infra/`.
+
 ## Service topology
 
 ```mermaid
@@ -34,9 +41,23 @@ flowchart LR
   M7 --> D2[(Firestore or local JSON)]
 ```
 
-Module 5 and Module 6 are Python libraries, not standalone HTTP services.
-Module 8 imports them directly. Module 3's Flower server is exposed on port
-8080 only when the Compose `federation` profile is enabled.
+The model zoo and condition router are Python libraries, not standalone HTTP
+services. Synthesis imports them directly. The federated server is exposed on
+port 8080 only when the Compose `federation` profile is enabled.
+
+## Dashboard/server contract
+
+The dashboard reads its public service origins from build-time Vite
+variables: `VITE_AUTH_API_BASE`, `VITE_ADMIN_API_BASE`, and
+`VITE_SYNTHESIS_API_BASE`. They default to the local ports shown above and are
+also passed as Docker build arguments; they contain URLs only, never secrets.
+
+Browser requests send the existing `Authorization: Bearer <JWT>` header when
+the caller supplies a token and always include credentials so the existing
+httpOnly session-cookie flow remains available. The dashboard does not hold
+service credentials. Auth, admin, and synthesis services continue to enforce
+their existing CORS allow-list from `FEDHEAL_DASHBOARD_ORIGIN`, and all role,
+hospital-scope, JWT, cookie, and service-token rules remain server-side.
 
 ## End-to-end data flow
 

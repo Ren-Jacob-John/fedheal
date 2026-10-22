@@ -1,13 +1,13 @@
 # Full local stack. DRAFT (Sprint C): validated as YAML, not yet built/run in
 # an environment with Docker. Usage:
 #   cp infra/deploy/compose.env.example .env   # then replace every CHANGE_ME
-#   docker compose up --build
+#   docker compose -f infra/docker-compose.yml up --build
 # Every secret is required (":?"); compose refuses to start with one unset.
-# First login: docker compose exec -e FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD=... auth python create_super_admin.py --email you@example.org
+# First login: docker compose -f infra/docker-compose.yml exec -e FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD=... auth python create_super_admin.py --email you@example.org
 # (public registration is closed; hospital admins create doctors).
 x-common: &common
   restart: unless-stopped
-  env_file: .env
+  env_file: ../.env
 
 # Module 1 and Module 7 talk to the Firestore emulator below. Both use the same project; their
 # collection names don't collide (Module 7 may be given its own database: FEDHEAL_ADMIN_FIRESTORE_DATABASE).
@@ -32,7 +32,7 @@ services:
 
   auth:            # Module 1
     <<: *common
-    build: {context: ., dockerfile: server/auth/Dockerfile}
+    build: {context: .., dockerfile: server/auth/Dockerfile}
     environment:
       <<: *firestore-env
       FEDHEAL_VALIDATION_API_URL: http://validation:8002
@@ -49,7 +49,7 @@ services:
 
   validation:      # Module 2
     <<: *common
-    build: {context: ., dockerfile: server/validation/Dockerfile}
+    build: {context: .., dockerfile: server/validation/Dockerfile}
     environment:
       FEDHEAL_ADMIN_API_URL: http://admin:8005
     ports: ["8002:8002"]
@@ -62,7 +62,7 @@ services:
 
   admin:           # Module 7
     <<: *common
-    build: {context: ., dockerfile: server/admin/Dockerfile}
+    build: {context: .., dockerfile: server/admin/Dockerfile}
     environment:
       <<: *firestore-env
       FEDMED_AUTH_API_URL: http://auth:8001
@@ -79,7 +79,7 @@ services:
 
   synthesis:       # Module 8 (Modules 5 and 6 are bundled into this image)
     <<: *common
-    build: {context: ., dockerfile: server/synthesis/Dockerfile}
+    build: {context: .., dockerfile: server/synthesis/Dockerfile}
     environment:
       FEDHEAL_AUTH_API_URL: http://auth:8001
       FEDHEAL_ADMIN_API_URL: http://admin:8005     # where the PROMOTED model is read from
@@ -100,7 +100,7 @@ services:
   fl-server:       # Module 3 Flower server; Compose uses plaintext by default (TLS options exist in M3)
     <<: *common
     profiles: [federation]
-    build: {context: ., dockerfile: module3-fedlearning/Dockerfile}
+    build: {context: .., dockerfile: server/federated-server/Dockerfile}
     depends_on:
       admin: {condition: service_healthy}
     ports: ["8080:8080"]
@@ -113,7 +113,7 @@ services:
 
   dashboard:       # Module 4; VITE_* URLs are baked in at build time
     build:
-      context: .
+      context: ..
       dockerfile: client/dashboard/Dockerfile
       args:
         VITE_AUTH_API_BASE: ${PUBLIC_AUTH_URL:-http://localhost:8001}

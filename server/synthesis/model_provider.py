@@ -14,7 +14,7 @@ Status of the model sources, in order of preference:
   2. DEMO FALLBACK (this file)           available only when explicitly allowed.
      The vitals specialist is fitted on the vendored public UCI Heart Disease
      (Cleveland) records that Module 3 already uses for its demo
-     (module3-fedlearning/uci_heart.py), expressed in Module 1's schema.
+     (hospital-node/uci_heart.py), expressed in Module 1's schema.
      Only 3 of the 8 features carry real values there (age, systolic BP,
      heart rate); the other 5 are constants (see that file's docstring), so
      the model can only ever learn from those 3. This is a development/demo
@@ -41,7 +41,7 @@ import numpy as np
 import config
 from feature_mapper import VITALS_MAPPING, verify_mapping
 
-UCI_MODULE_PATH = Path(__file__).resolve().parent.parent / "module3-fedlearning" / "uci_heart.py"
+UCI_MODULE_PATH = Path(__file__).resolve().parents[2] / "hospital-node" / "uci_heart.py"
 DEMO_MODEL_VERSION = "uci-cleveland-demo-1"
 
 

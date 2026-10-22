@@ -17,7 +17,7 @@ What's real vs. a prototype simplification, be upfront about both:
     also required adding one new endpoint to Module 1 itself:
     `PATCH /hospitals/{id}` (super_admin only) — see server/auth/main.py.
   - Training-round history: REAL, but requires Module 3 to report in.
-    module3-fedlearning/simulate.py now does this automatically after
+    hospital-node/simulate.py now does this automatically after
     each round (best-effort — if this service isn't running, the
     simulation still runs standalone, it just has nothing to report to).
   - Validation-flag summaries: REAL, same pattern — server/validation

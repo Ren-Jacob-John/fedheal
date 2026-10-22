@@ -69,7 +69,7 @@ provenance instead of inheriting a silent default.
 
 ### 1b. UCI Heart Disease seed
 
-Vendored at `module3-fedlearning/datasets/heart_cleveland_islr.csv`,
+Vendored at `hospital-node/datasets/heart_cleveland_islr.csv`,
 SHA-256 pinned, cited (Janosi et al. 1989, DOI 10.24432/C52P4X, CC BY
 4.0), with the full provenance chain in `datasets/README.md`.
 

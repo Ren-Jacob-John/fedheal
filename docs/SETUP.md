@@ -19,12 +19,12 @@ py -3.12 -m venv .venv
 $env:FEDHEAL_ENV = "development"
 python -m pip install -r server/auth\requirements.txt
 python -m pip install -r server/validation\requirements.txt
-python -m pip install -r module3-fedlearning\requirements.txt
+python -m pip install -r server\federated-server\requirements.txt
 python -m pip install -r server/model-zoo\requirements.txt
 python -m pip install -r server/condition-router\requirements.txt
 python -m pip install -r server/admin\requirements.txt
 python -m pip install -r server/synthesis\requirements.txt
-Copy-Item deploy\compose.env.example .env
+Copy-Item infra\deploy\compose.env.example .env
 ```
 
 For separate services, copy each module's `.env.example` to `.env` in that
@@ -65,7 +65,7 @@ after the required Module 1/7 service tokens and eligible data exist.
 python3 -m venv .venv
 source .venv/bin/activate
 export FEDHEAL_ENV=development
-for m in server/auth server/validation module3-fedlearning server/model-zoo server/condition-router server/admin server/synthesis; do
+for m in server/auth server/validation server/federated-server server/model-zoo server/condition-router server/admin server/synthesis; do
   python -m pip install -r "$m/requirements.txt"
 done
 cp infra/deploy/compose.env.example .env
@@ -82,15 +82,15 @@ At the repository root:
 ```bash
 cp infra/deploy/compose.env.example .env
 # replace every CHANGE_ME value with a generated placeholder-safe secret
-docker compose config
-docker compose up --build
+docker compose -f infra/docker-compose.yml config
+docker compose -f infra/docker-compose.yml up --build
 ```
 
 Compose starts the Firestore emulator, Modules 1, 2, 7, and 8, and the
 dashboard. Module 3 is behind the `federation` profile:
 
 ```bash
-docker compose --profile federation up --build
+docker compose -f infra/docker-compose.yml --profile federation up --build
 ```
 
 The current verification could not validate Compose because root `.env` was

@@ -11,7 +11,7 @@ v2.5 handles up to ~100K rows / ~2,000 features, which comfortably covers
 a hospital's structured-vitals table.
 
 Federation note: TabPFN doesn't "train" in the traditional sense, so the
-FedAvg pattern in module3-fedlearning doesn't apply to it directly the way
+FedAvg pattern in hospital-node doesn't apply to it directly the way
 it does to XGBoost/logistic regression. The practical federated pattern
 for a foundation model like this is: each hospital calls TabPFN locally
 on its own data (nothing to average — there are no weights to federate),

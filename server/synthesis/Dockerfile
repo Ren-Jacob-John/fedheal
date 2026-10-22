@@ -18,8 +18,8 @@ RUN HTTPS_PROXY= HTTP_PROXY= https_proxy= http_proxy= NO_PROXY= no_proxy= pip in
 
 COPY server/model-zoo/ /srv/server/model-zoo/
 COPY server/condition-router/ /srv/server/condition-router/
-COPY module3-fedlearning/uci_heart.py /srv/module3-fedlearning/uci_heart.py
-COPY module3-fedlearning/datasets/ /srv/module3-fedlearning/datasets/
+COPY hospital-node/uci_heart.py /srv/hospital-node/uci_heart.py
+COPY hospital-node/datasets/ /srv/hospital-node/datasets/
 COPY server/synthesis/ ./
 
 USER app

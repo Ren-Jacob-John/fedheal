@@ -26,7 +26,7 @@ M8 27, root 14. **283 passed, 0 failed.**
 Open findings, by priority:
 
 1. **Not verified:** Docker images and compose were not built or run (no Docker
-   here); YAML parses only. Do `docker compose up --build` once before Oct 7.
+   here); YAML parses only. Do `docker compose -f infra/docker-compose.yml up --build` once before Oct 7.
 2. **Module 7 in a container:** `/rounds/trigger` spawns `simulate.py` from Module 3,
    but the Module 7 image has no Module 3 dependencies (flwr, pandas). That
    endpoint will fail in compose. Either install them or trigger via the
@@ -39,6 +39,6 @@ Open findings, by priority:
    cells is a separate case.
 5. **Repo hygiene:** the uploaded archive contained 8 `.db`/`.pyc` files despite
    `.gitignore`. They are empty/compiled, but remove them from git history.
-   `module3-fedlearning/seed_uci_heart.py` hardcodes a demo password
+   `hospital-node/seed_uci_heart.py` hardcodes a demo password
    (`uci-seed-demo-password`); acceptable for demo seeding, must never reach staging.
 6. **Unchanged known risks:** see SECURITY.md and COMPLIANCE.md §3.

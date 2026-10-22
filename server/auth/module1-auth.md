@@ -188,7 +188,7 @@ on 500 unlabeled records used to report `ready_for_training`.
   workers horizontally.
 - No automated tests for this module specifically, though Module 3's
   `test_client_runner_matches_simulation.py` exercises its data path, and
-  `module3-fedlearning/seed_uci_heart.py` is an end-to-end exercise of
+  `hospital-node/seed_uci_heart.py` is an end-to-end exercise of
   the upload -> validate -> store path (dedicated unit tests are Sprint C).
 - ~~`create_all` and Alembic both live during this transitional sprint~~ —
   **superseded**: the SQL layer (and Alembic with it) was replaced by Firestore; there is

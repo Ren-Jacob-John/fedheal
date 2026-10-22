@@ -55,7 +55,7 @@ def assert_no_raw_data(value, path: str = "$") -> None:
 
 
 def canonical_hash(coef: list, intercept: list) -> str:
-    """Same canonical form as module3-fedlearning/federation_registry.artifact_hash (dtype <f8, shape, bytes),
+    """Same canonical form as hospital-node/federation_registry.artifact_hash (dtype <f8, shape, bytes),
     in pure Python so the registry can re-derive the hash itself instead of trusting the caller's."""
     import hashlib
     h = hashlib.sha256()

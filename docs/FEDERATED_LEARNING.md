@@ -16,7 +16,7 @@ floating-point result.
 
 ## Data sources
 
-- `module3-fedlearning/data.py` creates synthetic non-IID partitions for the
+- `hospital-node/data.py` creates synthetic non-IID partitions for the
   local simulation.
 - `uci_heart.py` and `seed_uci_heart.py` use the vendored UCI Cleveland data
   for a public-data demo path.

@@ -90,7 +90,7 @@ Ports: M1 8001 · M2 8002 · M7 8005 · M8 8006 · Flower 8080 · dashboard 5173
 |---|---|---|---|---|
 | 1 | `server/auth` | Multi-tenant auth, hospital CRUD, vitals upload/review/export, audit | `main.py` (983 lines), `auth.py`, `service_auth.py`, `models.py`, `limits.py`, `audit.py`, `config.py`, `migrations/` | IMPLEMENTED |
 | 2 | `server/validation` | 5-stage validation gate (de-id, schema, ranges, cross-field, outliers) | `main.py`, `rules.py`, `schema.py`, `anomaly.py`, `service_auth.py` | IMPLEMENTED |
-| 3 | `module3-fedlearning` | Local training + FedAvg (simulation and Flower server/client) | `server.py`, `client_runner.py`, `simulate*.py`, `fedavg.py`, `model.py`, `real_data.py`, `uci_heart.py` | PARTIAL |
+| 3 | `hospital-node` | Local training + FedAvg (simulation and Flower server/client) | `server.py`, `client_runner.py`, `simulate*.py`, `fedavg.py`, `model.py`, `real_data.py`, `uci_heart.py` | PARTIAL |
 | 4 | `client/dashboard` | Login, upload, flagged review, federation map, admin views, synthesis view | `src/App.jsx`, `src/api.js`, `src/components/*` | IMPLEMENTED (no tests) |
 | 5 | `server/model-zoo` | Specialist-model interface, registry, router, fusion | `base.py`, `registry.py`, `router.py`, `fusion.py`, `models/*` | PARTIAL (most specialists are stubs here) |
 | 6 | `server/condition-router` | Condition → specialists + explainers; SHAP/Grad-CAM/KG | `conditions.py`, `condition_router.py`, `condition_registry_builder.py`, `explainers/`, `models/` | PARTIAL |
@@ -250,7 +250,7 @@ Other:
 |---|---|
 | `server/auth` | **149 passed** (78 s) |
 | `server/validation` | **38 passed** |
-| `module3-fedlearning` | **15 passed** (not in CI) |
+| `hospital-node` | **15 passed** (not in CI) |
 | `server/model-zoo` | **6 passed** |
 | `server/condition-router` | **13 passed** |
 | `server/admin` | **21 passed** |
@@ -274,7 +274,7 @@ Local start (I ran these; all four `/health` returned 200 and the protected endp
 python -m venv .venv && . .venv/bin/activate
 pip install -r server/auth/requirements.txt -r server/validation/requirements.txt \
             -r server/admin/requirements.txt -r server/synthesis/requirements.txt \
-            -r server/condition-router/requirements.txt -r module3-fedlearning/requirements.txt
+            -r server/condition-router/requirements.txt -r server/federated-server/requirements.txt
 export FEDHEAL_ENV=development FEDHEAL_DATABASE_URL=sqlite:////tmp/fedheal.db \
        FEDMED_JWT_SECRET=<dev-only-secret> FEDHEAL_DASHBOARD_ORIGIN=http://localhost:5173 \
        FEDMED_AUTH_API_URL=http://localhost:8001 FEDHEAL_AUTH_API_URL=http://localhost:8001 \
@@ -287,7 +287,7 @@ export FEDHEAL_ENV=development FEDHEAL_DATABASE_URL=sqlite:////tmp/fedheal.db \
 (cd client/dashboard && npm ci && npm run dev)     # :5173
 ```
 
-Full stack (**UNVERIFIED here**): `cp infra/deploy/compose.env.example .env`, replace every `CHANGE_ME`, `docker compose up --build`; add `--profile federation` for the Flower server.
+Full stack (**UNVERIFIED here**): `cp infra/deploy/compose.env.example .env`, replace every `CHANGE_ME`, `docker compose -f infra/docker-compose.yml up --build`; add `--profile federation` for the Flower server.
 
 Environment variables (see each `.env.example`): `FEDHEAL_ENV`, `FEDHEAL_DATABASE_URL` (`FEDHEAL_ADMIN_DATABASE_URL` for M7 override), `FEDMED_JWT_SECRET`, `FEDHEAL_DASHBOARD_ORIGIN`, `FEDHEAL_SVC_SIGNING_KEY_M3_M1`, `FEDHEAL_SVC_SIGNING_KEY_M1_M2`, `FEDHEAL_SVC_KEY_M2_M7`, `FEDHEAL_SVC_KEY_M3_M7`, `FEDHEAL_SVC_TOKEN_M3_M1`, `FEDHEAL_AUTH_API_URL`, `FEDMED_AUTH_API_URL`, `FEDHEAL_VALIDATION_API_URL`, `FEDHEAL_ADMIN_API_URL`, `FEDHEAL_ALLOW_DEMO_MODEL`, optional `FEDHEAL_MAX_*` limits; dashboard `VITE_AUTH_API_BASE`, `VITE_ADMIN_API_BASE`, `VITE_SYNTHESIS_API_BASE`. Staging/production require ≥32-char non-placeholder secrets and https origins.
 

@@ -3,7 +3,7 @@ Service-to-service credentials that can express WHO is calling and WHICH
 HOSPITAL they may act for.
 
 CANONICAL COPY: duplicated verbatim into server/auth, server/validation,
-module3-fedlearning, server/admin and server/synthesis (see config.py's note; tests/test_shared_files_in_sync.py
+hospital-node, server/admin and server/synthesis (see config.py's note; tests/test_shared_files_in_sync.py
 enforces it).
 
 Why this exists

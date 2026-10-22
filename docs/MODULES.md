@@ -73,7 +73,7 @@ is public liveness. Request/response details are in
 **Dependencies:** called by Module 1; optionally reports summaries to Module
 7. Status: **implemented pipeline; no persistent database**.
 
-## Module 3 — `module3-fedlearning`
+## Module 3 — `hospital-node`
 
 **Responsibility:** hospital-local training, Flower network transport,
 deterministic FedAvg, dataset preparation, and candidate/round reporting.

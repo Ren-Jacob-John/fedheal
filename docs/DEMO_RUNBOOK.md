@@ -12,7 +12,7 @@ layer.
 ```
 python -m venv .venv && . .venv/bin/activate
 pip install -r server/auth/requirements.txt -r server/validation/requirements.txt \
-  -r module3-fedlearning/requirements.txt -r server/condition-router/requirements.txt \
+  -r server/federated-server/requirements.txt -r server/condition-router/requirements.txt \
   -r server/admin/requirements.txt -r server/synthesis/requirements.txt
 export FEDHEAL_ENV=development \
   FEDHEAL_DASHBOARD_ORIGIN=http://localhost:5173 FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD=demo-bootstrap-password-1

@@ -829,7 +829,7 @@ def review_flagged_vitals(
 
 # ---------- Vitals export (Module 3 wiring) ----------
 # Service-to-service only (not a human JWT) — this is what
-# module3-fedlearning/real_data.py calls to pull a hospital's validated
+# hospital-node/real_data.py calls to pull a hospital's validated
 # vitals instead of synthetic data. Only ever returns what's already been
 # through Module 2's checks; never raw unvalidated uploads.
 #

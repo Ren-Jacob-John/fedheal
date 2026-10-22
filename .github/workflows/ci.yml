@@ -6,7 +6,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [server/auth, server/validation, module3-fedlearning, server/model-zoo, server/condition-router, server/admin, server/synthesis]
+        module: [server/auth, server/validation, server/federated-server, server/model-zoo, server/condition-router, server/admin, server/synthesis]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,7 +27,7 @@ jobs:
         with: {python-version: "3.12"}
       - run: |
           pip install pytest
-          for m in server/auth server/validation module3-fedlearning server/admin server/synthesis; do pip install -r $m/requirements.txt; done
+          for m in server/auth server/validation server/federated-server server/admin server/synthesis; do pip install -r $m/requirements.txt; done
       - run: python -m pytest -q tests
         env: {FEDHEAL_ENV: development}
   dashboard:
@@ -75,10 +75,10 @@ jobs:
               github_env.write(f"FEDHEAL_E2E_SUPER_ADMIN_PASSWORD={password}\n")
           PY
       - name: Start the local Compose stack
-        run: docker compose up --build --detach --wait --wait-timeout 300
+        run: docker compose -f infra/docker-compose.yml up --build --detach --wait --wait-timeout 300
       - name: Bootstrap a temporary platform administrator
         run: |
-          docker compose exec -T \
+          docker compose -f infra/docker-compose.yml exec -T \
             -e "FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD=$FEDHEAL_E2E_SUPER_ADMIN_PASSWORD" \
             auth python create_super_admin.py --email pw-e2e-admin@fedheal.test
       - name: Install dashboard and browser dependencies
@@ -95,4 +95,4 @@ jobs:
           FEDHEAL_E2E_SUPER_ADMIN_PASSWORD="$FEDHEAL_E2E_SUPER_ADMIN_PASSWORD" npm run test:e2e
       - name: Stop the Compose stack
         if: always()
-        run: docker compose down --remove-orphans
+        run: docker compose -f infra/docker-compose.yml down --remove-orphans
