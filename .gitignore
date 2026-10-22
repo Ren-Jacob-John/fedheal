@@ -17,6 +17,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.deps/
 
 # Node (if the frontend gets rebuilt in React/Next.js later)
 node_modules/
