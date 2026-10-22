@@ -1,13 +1,11 @@
 # Demo runbook (synthetic / public data only)
 
 **Execution status:** this remains a runbook, not a claim of a completed
-Compose demo. The current environment had no Docker executable and only
-Python 3.14.6 (CI targets Python 3.12). Compose YAML parsing and focused
-service tests were run, but Compose, Firestore emulator, and browser
-workflow were not executed here. The Playwright spec exists and a CI job is
-configured, but neither has been executed in this environment. The Compose stack uses the Firestore
-emulator, not Postgres, matching the repository's current Firestore data
-layer.
+end-to-end Compose demo. The current refactor validated Compose configuration,
+local service imports, and HTTP health endpoints. Full image startup,
+Firestore-emulator orchestration, and browser workflow remain environment
+dependent. The Compose stack uses the Firestore emulator, not Postgres,
+matching the repository's current Firestore data layer.
 
 ```
 python -m venv .venv && . .venv/bin/activate
@@ -33,16 +31,11 @@ Services also need (development defaults exist for the signing keys; set real on
 4. **Vitals, history, scan.** Enter vitals (leave unknown fields blank — nothing is filled in), a history, and
    optionally a PNG/JPEG scan (stored and linked; the report will say analysis is unavailable).
 5. **Before any model is promoted:** *Run AI analysis* → `MODEL_UNAVAILABLE` (the demo fallback is off). This is correct.
-6. **Federated lifecycle verification (optional).** From the repository root,
-   run `python -m pytest -q tests/integration/test_federation_flow.py`. This
-   integration test starts throwaway real services, seeds public UCI records,
-   adds clearly marked synthetic records to cross a one-record test threshold,
-   and has hospital-scoped runners perform a networked Flower round. A
-   provenance-complete aggregate is registered as CANDIDATE; the test then
-   exercises the validation gate, explicit super-admin promotion, and
-   inference. Its relaxed test gate is for wiring verification only, not a
-   model-quality claim. Do not run `simulate_real.py`: central pooling of
-   hospital records is disabled by the privacy boundary.
+6. **Federated lifecycle verification (optional).** The current checkout has
+   no integration test files. When those tests are supplied, run the
+   repository-specific federation flow from the root. Do not run
+   `simulate_real.py` with centralized patient data: central pooling is
+   disabled by the privacy boundary.
 7. **Gate and promotion.** The integration test exercises these as separate
    super-admin actions after candidate registration; the default gate is not
    relaxed by normal runtime configuration, and retraining never promotes a

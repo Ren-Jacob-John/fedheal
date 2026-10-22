@@ -143,7 +143,7 @@ Ports: M1 8001 · M2 8002 · M7 8005 · M8 8006 · Flower 8080 · dashboard 5173
 | Dashboard: login, upload, flagged review | M4 | IMPLEMENTED | Builds; no automated UI tests |
 | Dashboard: federation map, rounds rail, system map, admin actions | M4 | IMPLEMENTED | Admin views gated on `role === "super_admin"` client-side (server enforces the real check) |
 | Dashboard: SynthesisView record picker | M4 | IMPLEMENTED | Picks a stored record id; no manual feature entry |
-| Docker Compose full stack | root | PARTIAL | YAML only. File itself says "DRAFT… not yet built/run". **Docker is not available in this audit environment — UNVERIFIED** |
+| Docker Compose full stack | `infra/` | PARTIAL | Configuration validates with `infra/deploy/compose.env.example`; full image build/runtime remains unverified |
 | CI | root | PARTIAL | Runs M1, M2, M5, M6, M7, M8, root tests, dashboard build. **Module 3 tests are not in CI** |
 
 ---
@@ -244,7 +244,10 @@ Other:
 
 ---
 
-## 9. Test status (this audit, Python 3.12.3, `FEDHEAL_ENV=development`)
+## 9. Historical test status
+
+The results below describe the pre-restructure source tree and are retained
+for historical context. They are not results from the current checkout.
 
 | Suite | Result |
 |---|---|
@@ -263,7 +266,33 @@ Not run / not verifiable here: Docker build and compose, Postgres, real Flower n
 
 ---
 
-## 10. Run commands (verified)
+## 10. Current layout and verification
+
+The current source tree has no Python test files, root `tests/` directory, or
+Playwright specs. The refactor verification therefore reports eight backend
+pytest invocations with `no tests ran`/exit 5, while the dashboard build,
+Python compilation, moved-service import checks, Compose configuration, and
+local service health checks passed. See [TESTING.md](TESTING.md) and
+[RESTRUCTURE_PLAN.md](RESTRUCTURE_PLAN.md) for the exact baseline and
+after-results.
+
+Use the cross-platform helpers from the repository root:
+
+```text
+scripts/run-one.ps1 <service>       # Windows
+scripts/run-one.sh <service>        # Linux/macOS
+scripts/run-all.ps1
+scripts/run-all.sh
+scripts/test-all.ps1
+scripts/test-all.sh
+```
+
+The current service directories are `server/auth`, `server/validation`,
+`server/federated-server`, `server/model-zoo`, `server/condition-router`,
+`server/admin`, `server/synthesis`, and `hospital-node`. The dashboard is
+`client/dashboard`; deployment configuration is under `infra/`.
+
+## 11. Historical run commands
 
 Per-module tests (from the module directory): `FEDHEAL_ENV=development python -m pytest -q`
 Root/integration: `FEDHEAL_ENV=development python -m pytest -q tests`
@@ -287,9 +316,19 @@ export FEDHEAL_ENV=development FEDHEAL_DATABASE_URL=sqlite:////tmp/fedheal.db \
 (cd client/dashboard && npm ci && npm run dev)     # :5173
 ```
 
-Full stack (**UNVERIFIED here**): `cp infra/deploy/compose.env.example .env`, replace every `CHANGE_ME`, `docker compose -f infra/docker-compose.yml up --build`; add `--profile federation` for the Flower server.
+Full stack (configuration verified; image/runtime unverified): `cp infra/deploy/compose.env.example .env`, replace every `CHANGE_ME`, `docker compose -f infra/docker-compose.yml up --build`; add `--profile federation` for the Flower server.
 
-Environment variables (see each `.env.example`): `FEDHEAL_ENV`, `FEDHEAL_DATABASE_URL` (`FEDHEAL_ADMIN_DATABASE_URL` for M7 override), `FEDMED_JWT_SECRET`, `FEDHEAL_DASHBOARD_ORIGIN`, `FEDHEAL_SVC_SIGNING_KEY_M3_M1`, `FEDHEAL_SVC_SIGNING_KEY_M1_M2`, `FEDHEAL_SVC_KEY_M2_M7`, `FEDHEAL_SVC_KEY_M3_M7`, `FEDHEAL_SVC_TOKEN_M3_M1`, `FEDHEAL_AUTH_API_URL`, `FEDMED_AUTH_API_URL`, `FEDHEAL_VALIDATION_API_URL`, `FEDHEAL_ADMIN_API_URL`, `FEDHEAL_ALLOW_DEMO_MODEL`, optional `FEDHEAL_MAX_*` limits; dashboard `VITE_AUTH_API_BASE`, `VITE_ADMIN_API_BASE`, `VITE_SYNTHESIS_API_BASE`. Staging/production require ≥32-char non-placeholder secrets and https origins.
+Environment variables (see each `.env.example`): `FEDHEAL_ENV`,
+`FEDHEAL_DB_BACKEND`, `FEDHEAL_FIREBASE_PROJECT_ID`,
+`FEDMED_JWT_SECRET`, `FEDHEAL_DASHBOARD_ORIGIN`,
+`FEDHEAL_SVC_SIGNING_KEY_M3_M1`, `FEDHEAL_SVC_SIGNING_KEY_M1_M2`,
+`FEDHEAL_SVC_SIGNING_KEY_M2_M7`, `FEDHEAL_SVC_SIGNING_KEY_M3_M7`,
+`FEDHEAL_SVC_SIGNING_KEY_M8_M7`, `FEDHEAL_SVC_TOKEN_M3_M1`,
+`FEDHEAL_AUTH_API_URL`, `FEDMED_AUTH_API_URL`,
+`FEDHEAL_VALIDATION_API_URL`, `FEDHEAL_ADMIN_API_URL`,
+`FEDHEAL_ALLOW_DEMO_MODEL`, optional `FEDHEAL_MAX_*` limits, and dashboard
+`VITE_AUTH_API_BASE`, `VITE_ADMIN_API_BASE`, `VITE_SYNTHESIS_API_BASE`.
+Staging/production require non-placeholder secrets and HTTPS origins.
 
 ---
 

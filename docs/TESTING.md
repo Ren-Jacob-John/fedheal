@@ -7,13 +7,14 @@ Node.js v24.12.0, and npm 11.11.0.
 
 | Check | Result |
 |---|---|
-| `python -m pytest -q` in each Python module | **Not run to completion**: `pytest` is not installed; each invocation failed with `No module named pytest`. |
-| Test file inventory | No `test_*.py`, `*_test.py`, root `tests/`, or Playwright spec files are present in this checkout. Historical test claims in existing docs are therefore not reproducible from this tree. |
+| `python -m pytest -q` in each Python module | **Executed** in `server/auth`, `server/validation`, `server/federated-server`, `hospital-node`, `server/model-zoo`, `server/condition-router`, `server/admin`, and `server/synthesis`; each reported `no tests ran` and exit 5 |
+| Test file inventory | No `test_*.py`, `*_test.py`, root `tests/`, or Playwright spec files are present in this checkout |
 | `npm --prefix client/dashboard run build` | **Passed**; Vite transformed 28 modules and produced `dist/`. |
-| `docker compose -f infra/docker-compose.yml config` | **Not verified**; Compose stopped because root `.env` is absent. |
+| `docker compose -f infra/docker-compose.yml --env-file infra/deploy/compose.env.example config` | **Passed** |
 
-No Python pass/fail count is claimed. Installing dependencies and running
-historical suites would require test files that are not present here.
+No Python pass count is claimed because no test files are present. The
+non-zero pytest exit code is the standard pytest result for an empty test
+collection, not a failing assertion.
 
 ## Available commands when dependencies and tests are supplied
 
@@ -26,6 +27,15 @@ docker compose -f infra/docker-compose.yml config
 docker compose -f infra/docker-compose.yml up --build
 ```
 
+The cross-platform wrappers are:
+
+```text
+scripts/test-all.ps1
+scripts/test-all.sh
+scripts/run-all.ps1
+scripts/run-all.sh
+```
+
 The module `requirements.txt` files define runtime dependencies. The React
 package defines `test:e2e` as `playwright test`, but no test spec is present in
 this checkout.
@@ -34,8 +44,8 @@ this checkout.
 
 - No executable Python test suite is present.
 - Browser E2E execution is not verified.
-- Real Firestore, Firestore emulator, Docker/Compose runtime, TLS, load, and
-  multi-machine Flower execution are not verified in this task.
+- Full Docker image build/Compose runtime, TLS, load, and multi-machine
+  Flower execution are not verified in this task.
 - The model registry stores reported metrics and gates them; it does not
   independently re-measure clinical performance.
 

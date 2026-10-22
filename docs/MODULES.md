@@ -73,31 +73,42 @@ is public liveness. Request/response details are in
 **Dependencies:** called by Module 1; optionally reports summaries to Module
 7. Status: **implemented pipeline; no persistent database**.
 
-## Module 3 — `hospital-node`
+## Module 3 — federated learning
+
+The federated-learning component is intentionally split by data ownership:
+the central process is in `server/federated-server/`, while hospital-local
+training and raw/demo data are in `hospital-node/`. Raw patient rows must not
+be sent to the central process.
 
 **Responsibility:** hospital-local training, Flower network transport,
 deterministic FedAvg, dataset preparation, and candidate/round reporting.
 
-**Entry point and key files:** `server.py`, `client_runner.py`, `client.py`,
-`model.py`, `fedavg.py`, `real_data.py`, `data.py`, `federation_registry.py`,
-`privacy.py`, `seed_uci_heart.py`, `compare_uci_heart.py`,
-`simulate.py`, and `simulate_real.py`.
+**Central entry point and key files:** `server/federated-server/server.py`,
+`fedavg.py`, `federation_registry.py`, `privacy.py`, `config.py`, and
+`requirements.txt`.
+
+**Hospital-local entry point and key files:** `hospital-node/client_runner.py`,
+`client.py`, `model.py`, `real_data.py`, `data.py`, `seed_uci_heart.py`,
+`compare_uci_heart.py`, `simulate.py`, `simulate_real.py`, `uci_heart.py`,
+and `datasets/`.
 
 **Public API:** no owned HTTP API. The Flower server listens on the configured
 address (Compose maps 8080). It calls Module 1 `GET /hospitals` and
 `GET /vitals/export`, and Module 7 round/retraining/candidate endpoints.
 
-**Configuration:** `.env.example` lists `FEDHEAL_ENV` and
-`FEDHEAL_AUTH_API_URL`; code also reads `FEDHEAL_ADMIN_API_URL`,
+**Configuration:** `server/federated-server/.env.example` lists
+`FEDHEAL_ENV` and `FEDHEAL_AUTH_API_URL`; code also reads
+`FEDHEAL_ADMIN_API_URL`,
 `FEDHEAL_SVC_TOKEN_M3_M1`, `FEDHEAL_SVC_TOKEN_M3_M7`,
 `FEDHEAL_MODEL_STORAGE_PATH`, `FEDHEAL_VITALS_FEATURE_SCHEMA`,
 `FEDHEAL_UPDATE_CLIP_NORM`, `FEDHEAL_UPDATE_NOISE_MULTIPLIER`, and runner
 arguments/environment used for service access.
 
-**Dependencies:** Modules 1 and 7; Flower, NumPy, scikit-learn. Status:
-**implemented synthetic and networked paths; cross-machine/TLS deployment not
-verified**. `simulate_real.py` intentionally refuses centralized raw-data
-pooling.
+**Dependencies:** the central process reports to Module 7; hospital-local
+clients read scoped exports from Module 1 and may report to Module 7. Flower,
+NumPy, and scikit-learn are required. Status: **implemented synthetic and
+networked paths; cross-machine/TLS deployment not verified**.
+`simulate_real.py` intentionally refuses centralized raw-data pooling.
 
 ## Module 4 — `client/dashboard`
 

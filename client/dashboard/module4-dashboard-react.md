@@ -9,7 +9,7 @@ federation (every hospital as a node orbiting the shared model), round-
 by-round training history, and an architecture view of all eight
 modules.
 
-This React + Vite app replaces an earlier plain-HTML `module4-dashboard/`
+This React + Vite app replaces an earlier plain-HTML dashboard
 (removed after confirming full feature parity against Modules 1 and 7) —
 this is now the single supported dashboard going forward.
 
@@ -96,14 +96,10 @@ Production build: `npm run build` (outputs to `dist/`); preview with
 
 ## Known limitations / current status
 
-- The synthesis view (Sprint B) only supports the `heart_disease`
-  condition, entered as the vitals specialist's own 8 raw features — it
-  does not (yet) pull from a hospital's already-uploaded/flagged
-  records, because Module 1's stored vitals-upload schema and the
-  model's feature space aren't reconciled (see
-  `docs/DEVELOPMENT_PLAN.md`'s Sprint A risk register). Wiring "pick an
-  existing record" instead of hand-entering values is a natural Sprint C
-  follow-on once that schema gap closes.
+- The synthesis view currently supports the `heart_disease` condition through
+  the stored-record flow. The dashboard sends a record id; Module 8 reads
+  the caller-scoped record from Module 1 and reports missing or unavailable
+  inputs explicitly.
 - The Grad-CAM explainer / imaging conditions have no UI yet — deferred
   per `docs/DEVELOPMENT_PLAN.md` section 4, item 4 (no real imaging
   output to visualize until a real specialist replaces the current

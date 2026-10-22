@@ -11,6 +11,24 @@ explanations.
 > The optional UCI fallback is a **NON-CLINICAL DEMO** and is not a federated
 > hospital model.
 
+## Repository layout
+
+```text
+client/dashboard/          React/Vite dashboard and Playwright configuration
+server/auth/               Authentication, users, hospitals, cases, and vitals
+server/validation/         Stateless vitals validation
+server/federated-server/   Central Flower server and FedAvg aggregation
+server/model-zoo/          Specialist model contracts and registry
+server/condition-router/   Condition routing and explainers
+server/admin/              Platform registry, rounds, and promotion controls
+server/synthesis/          Clinician-review synthesis HTTP service
+server/shared/             Shared-code audit notes; service copies remain local
+hospital-node/             Hospital-local federated client and local datasets
+infra/                     Compose, Firestore/Firebase, and deployment examples
+scripts/                   Cross-platform local run and test helpers
+docs/                      Architecture, API, setup, security, and runbooks
+```
+
 ## Architecture
 
 ```mermaid
@@ -50,10 +68,31 @@ python server/auth/create_super_admin.py --email admin@example.invalid
 python -m uvicorn main:app --app-dir server/auth --port 8001
 ```
 
-Start Modules 2, 7, 8 and the dashboard in separate terminals. For the full
-container path, copy `infra/deploy/compose.env.example` to `.env`, replace
-placeholders, and run `docker compose -f infra/docker-compose.yml up --build`.
-See [SETUP.md](docs/SETUP.md).
+Start the remaining services in separate terminals, or use
+`scripts/run-one.sh` / `scripts/run-one.ps1`. For the full container path,
+copy `infra/deploy/compose.env.example` to `.env`, replace placeholders, and
+run `docker compose -f infra/docker-compose.yml up --build`. See
+[SETUP.md](docs/SETUP.md).
+
+The dashboard API origins are configurable at build time with
+`VITE_AUTH_API_BASE`, `VITE_ADMIN_API_BASE`, and `VITE_SYNTHESIS_API_BASE`.
+They are public URLs, not credentials. CORS remains controlled by the server
+side `FEDHEAL_DASHBOARD_ORIGIN` setting.
+
+## Local scripts
+
+```text
+scripts/run-one.ps1 <service>       Windows service runner
+scripts/run-one.sh <service>        Linux/macOS service runner
+scripts/run-all.ps1                 Start local HTTP services and dashboard
+scripts/run-all.sh                  Start local HTTP services and dashboard
+scripts/test-all.ps1                Run all discovered Python test suites
+scripts/test-all.sh                 Run all discovered Python test suites
+```
+
+Supported services are `auth`, `validation`, `federated-server`, `admin`,
+`synthesis`, and `dashboard`. These scripts do not create a virtual
+environment, install dependencies, or use Docker.
 
 ## Documentation
 
@@ -72,10 +111,14 @@ See [SETUP.md](docs/SETUP.md).
 
 ## Current verification
 
-In the documentation pass, the React production build passed. Python test
-execution was not possible because `pytest` is not installed and no test files
-are present in this checkout. Docker Compose validation was not possible
-because the root `.env` file was absent. No test count is claimed.
+The current refactor verification passed the dashboard production build,
+Python compilation, moved-service import smoke checks, Docker Compose
+configuration validation using `infra/deploy/compose.env.example`, and local
+HTTP health checks for auth, validation, admin, synthesis, and the dashboard.
+The repository contains no discoverable Python or Playwright test files, so
+the backend test commands report “no tests ran” rather than a pass count.
+Full Docker image startup and multi-machine federated training remain
+unverified.
 
 ## Safety boundary
 

@@ -15,7 +15,7 @@
 | Imaging analysis | Stub/unavailable | Scan endpoint returns `analysis_unavailable`; no validated imaging model serves bytes. |
 | Other specialist models | Partial/stub | Registry and contracts exist; many models require unavailable dependencies/weights/data. |
 | Browser dashboard | Implemented | React build passes; browser E2E is not verified and no spec is present. |
-| Tests in this checkout | Missing/not verified | No test files are present; pytest is not installed. |
+| Tests in this checkout | Missing | No Python or Playwright test files are present; pytest invocations report an empty collection. |
 
 ## Known technical debt
 
