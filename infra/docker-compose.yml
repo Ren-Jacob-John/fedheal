@@ -7,7 +7,9 @@
 # (public registration is closed; hospital admins create doctors).
 x-common: &common
   restart: unless-stopped
-  env_file: ../.env
+  env_file:
+    - path: ../.env
+      required: false
 
 # Module 1 and Module 7 talk to the Firestore emulator below. Both use the same project; their
 # collection names don't collide (Module 7 may be given its own database: FEDHEAL_ADMIN_FIRESTORE_DATABASE).
