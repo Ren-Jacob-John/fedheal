@@ -1,6 +1,66 @@
-# FedHeal — Implementation Report (INTERIM, 2026-10-07)
+# FedHeal — Implementation Report
 
-An honest status, not a "done" declaration. Items are labelled IMPLEMENTED / PARTIAL / NOT IMPLEMENTED.
+## Client-server restructure (2026-10-22)
+
+The repository was restructured on branch
+`ren-jacob-john-restructure-client-server` without changing business logic,
+API contracts, authentication behavior, or security rules.
+
+### What moved
+
+- `module4-dashboard-react` -> `client/dashboard`
+- Modules 1, 2, 5, 6, 7, and 8 -> `server/auth`, `server/validation`,
+  `server/model-zoo`, `server/condition-router`, `server/admin`, and
+  `server/synthesis`
+- Module 3 central aggregation -> `server/federated-server`
+- Module 3 hospital-local client, data loading, simulations, and demo dataset
+  -> `hospital-node`
+- Compose, Firebase, Firestore, and deployment examples -> `infra`
+- Added `scripts/run-all`, `scripts/run-one`, and `scripts/test-all` for both
+  PowerShell and Linux/macOS
+
+All moves used `git mv` and were committed by logical group. The complete
+mapping, risks, path audit, and open questions are in
+[`docs/RESTRUCTURE_PLAN.md`](docs/RESTRUCTURE_PLAN.md).
+
+The byte-identical shared files (`service_auth.py`, `audit.py`,
+`docs_theme.py`, and `limits.py`) were verified by SHA-256 but remain
+service-local. Their current flat-import and container working-directory
+semantics make consolidation risky for a structural-only refactor; the
+decision is documented in `server/shared/README.md`.
+
+### Verification before vs. after
+
+| Check | Before | After |
+|---|---|---|
+| Backend pytest invocations | 7 invocations, all exit 5 (`no tests ran`) | 8 invocations after the module 3 split, all exit 5 (`no tests ran`) |
+| Dashboard production build | Passed; 28 modules | Passed; 28 modules |
+| Python compile check | Not part of the baseline | Passed for `server` and `hospital-node` |
+| Moved-service import smoke check | Not run | Passed for auth, validation, admin, synthesis, federated-server, and condition-router in development mode |
+| Docker Compose config | Not verified at baseline | Passed with `infra/deploy/compose.env.example` |
+| Local health checks | Not run | Auth, validation, admin, synthesis, and dashboard returned HTTP 200 |
+| Federated server boot | Not run | Process started and remained running until deliberately stopped |
+
+The initial health pass had a transient startup race for validation and
+synthesis; a retry after the processes reached readiness returned HTTP 200
+for both. The complete Docker image build/Compose runtime was not run.
+
+### Remaining open questions
+
+- Historical test files described by older documentation are absent from this
+  checkout, so no backend pass count beyond “no tests ran” can be claimed.
+- The shared-file consolidation remains intentionally deferred; see
+  `server/shared/README.md`.
+- `firebase-debug.log` remains tracked under `infra/` because removing it was
+  outside the requested structural scope.
+- Full multi-process federated training with real hospital data and Docker
+  health orchestration still requires its external services, credentials, and
+  eligible data.
+
+---
+
+The earlier implementation status below is retained as historical context.
+Items are labelled IMPLEMENTED / PARTIAL / NOT IMPLEMENTED.
 
 ## IMPLEMENTED
 - **Onboarding:** super_admin → hospital → hospital_admin → doctors (create / list / disable, own hospital only; foreign `hospital_id` → 403, audited). **Public self-registration is closed by default** (`FEDHEAL_ALLOW_PUBLIC_REGISTRATION`). Disabled accounts cannot log in and their tokens stop working.
