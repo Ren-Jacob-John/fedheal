@@ -61,7 +61,7 @@ hand each time a case comes in.
 ## How to run it
 
 ```bash
-cd module6-condition-router
+cd server/condition-router
 pip install -r requirements.txt
 python demo.py
 ```

@@ -22,7 +22,7 @@ from base import PredictionResult
 # Originally only covered module5's own modalities (vitals/chest_xray/
 # retina/skin/ct_scan). Module 6 added condition-specific specialists
 # reporting different modality strings (genomic/histopathology/cbc — see
-# module6-condition-router/models/*.py and condition_registry_builder.py
+# server/condition-router/models/*.py and condition_registry_builder.py
 # for the exact label sets), which had no entries here — every one of
 # their findings silently fell back to the "unknown label" neutral weight
 # below, so a fused score across e.g. genomic + histopathology findings

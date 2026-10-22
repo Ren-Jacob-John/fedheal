@@ -36,8 +36,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "module6-condition-router"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "module5-modelzoo"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "server/condition-router"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "server/model-zoo"))
 
 from condition_router import (  # noqa: E402
     ConditionRouter, IncompleteDataError, SpecialistUnavailableError, UnknownConditionError,
@@ -99,7 +99,7 @@ def _error(status_code: int, code: str, message: str, **extra) -> HTTPException:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "module8-synthesis"}
+    return {"status": "ok", "service": "server/synthesis"}
 
 
 @app.get("/models/status")

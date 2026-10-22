@@ -11,16 +11,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN useradd --create-home --uid 10001 app
 
-WORKDIR /srv/module8-synthesis
+WORKDIR /srv/server/synthesis
 
-COPY module8-synthesis/requirements.txt ./
+COPY server/synthesis/requirements.txt ./
 RUN HTTPS_PROXY= HTTP_PROXY= https_proxy= http_proxy= NO_PROXY= no_proxy= pip install --no-cache-dir --use-deprecated=legacy-certs --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements.txt
 
-COPY module5-modelzoo/ /srv/module5-modelzoo/
-COPY module6-condition-router/ /srv/module6-condition-router/
+COPY server/model-zoo/ /srv/server/model-zoo/
+COPY server/condition-router/ /srv/server/condition-router/
 COPY module3-fedlearning/uci_heart.py /srv/module3-fedlearning/uci_heart.py
 COPY module3-fedlearning/datasets/ /srv/module3-fedlearning/datasets/
-COPY module8-synthesis/ ./
+COPY server/synthesis/ ./
 
 USER app
 

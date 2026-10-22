@@ -21,8 +21,8 @@ lifelines==0.30.3
 # timm>=1.0
 
 # Needed only for the new genomic_variant_breast_cancer / genomic_variant_leukemia
-# specialists (Evo 2, imported from module5-modelzoo — see
-# module5-modelzoo/models/foundation_evo2.py). Falls back to the existing
+# specialists (Evo 2, imported from server/model-zoo — see
+# server/model-zoo/models/foundation_evo2.py). Falls back to the existing
 # Random Forest genomic_breast_cancer / genomic_leukemia specialists
 # automatically if unavailable.
 # evo2

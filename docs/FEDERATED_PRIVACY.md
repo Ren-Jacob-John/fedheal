@@ -9,7 +9,7 @@ Two different things are protected, and they are not the same:
   (`test_federation_registry.py::test_client_fit_returns_only_weights_a_count_and_an_id`).
 - The model registry accepts only ids, hashes, short strings and aggregate numbers and refuses
   payloads containing patient/record-like fields or oversized lists/strings
-  (`module7-admin/model_registry.py::assert_no_raw_data`; 7 parametrised refusal tests).
+  (`server/admin/model_registry.py::assert_no_raw_data`; 7 parametrised refusal tests).
 - The integration test checks the stored registry row contains no patient references or vitals values.
 - Audit events carry ids only, never clinical content (tested).
 

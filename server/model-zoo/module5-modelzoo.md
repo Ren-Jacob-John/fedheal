@@ -66,7 +66,7 @@ is worse than an explicit "I don't have a specialist for this" error.
 ## How to run it
 
 ```bash
-cd module5-modelzoo
+cd server/model-zoo
 pip install -r requirements.txt   # installs tabpfn/xgboost/lightgbm/sklearn
                                    # by default; see requirements.txt's
                                    # comments for the (larger) torch/GPU

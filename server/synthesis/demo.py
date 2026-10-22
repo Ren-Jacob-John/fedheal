@@ -11,8 +11,8 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "module6-condition-router"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "module5-modelzoo"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "server/condition-router"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "server/model-zoo"))
 
 from condition_router import ConditionRouter, UnknownConditionError  # noqa: E402
 from conditions import resolve_condition  # noqa: E402

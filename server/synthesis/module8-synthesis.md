@@ -67,7 +67,7 @@ fused=None)`** is the module's one real function:
 ## How to run it
 
 ```bash
-cd module8-synthesis
+cd server/synthesis
 pip install -r requirements.txt
 python demo.py                              # library demo, no server
 uvicorn main:app --reload --port 8006       # HTTP service (Sprint B)
@@ -86,7 +86,7 @@ imports across services. See "HTTP surface" below.
   `resolve_condition`) and Module 5 (`FusedAssessment`).
 - **Depended on by:** Module 4 (dashboard) — its Synthesis view calls
   `POST /synthesize/record` to render a `SynthesisReport` in the
-  browser (Sprint B; see `module4-dashboard-react/module4-dashboard-react.md`).
+  browser (Sprint B; see `client/dashboard/client/dashboard.md`).
 
 ## HTTP surface (new in Sprint B)
 
@@ -112,7 +112,7 @@ vitals→SHAP→synthesis story demoable"):
   see **`docs/DATA_CONTRACT.md`** for the table and the field mapping.
 - `GET /models/status?condition=...` — what would run for a condition and
   how real each piece is (stub / fallback / training status).
-- `GET /health` — `{"status": "ok", "service": "module8-synthesis"}`.
+- `GET /health` — `{"status": "ok", "service": "server/synthesis"}`.
 - `POST /synthesize/heart_disease` — **retired (410)**. It took 8 hand-typed
   numbers in a legacy feature space that matched no stored data.
 - `POST /cases/{case_id}/analyze` — builds a hospital-scoped review packet.

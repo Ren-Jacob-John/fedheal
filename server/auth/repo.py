@@ -14,7 +14,7 @@ same atomic commit as the entity. A concurrent duplicate loses with
 DuplicateError instead of silently creating a second row.
 
 Composite indexes the ordered queries need are declared in
-firestore.indexes.json at the repo root.
+infra/firestore.indexes.json at the repo root.
 """
 from __future__ import annotations
 

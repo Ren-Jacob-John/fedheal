@@ -10,7 +10,7 @@ Supabase Auth/Storage. So the move is a data-layer change in **Module 1** (auth,
 |---|---|
 | SQLAlchemy models + queries in endpoints | dataclasses (`models.py`), explicit methods (`repo.py`), one storage interface (`docstore.py`, identical copy in M1 and M7) |
 | `FEDHEAL_DATABASE_URL` / `FEDHEAL_ADMIN_DATABASE_URL` | `FEDHEAL_DB_BACKEND`, `FEDHEAL_FIREBASE_PROJECT_ID`, Google credentials |
-| Alembic migrations on container start | none: collections appear on first write; indexes are `firestore.indexes.json` |
+| Alembic migrations on container start | none: collections appear on first write; indexes are `infra/firestore.indexes.json` |
 | SQLite fallback in development | local JSON-file store (`FEDHEAL_LOCAL_STORE_PATH`) |
 | `postgres` service in Compose | Firestore **emulator** service in Compose (data is lost when it stops) |
 
@@ -30,7 +30,7 @@ development), `memory` (tests). `local`/`memory` are refused outside development
    ```
    firebase deploy --only firestore:rules,firestore:indexes
    ```
-   `firestore.rules` denies every direct client read/write; only the services (service account) touch the data.
+   `infra/firestore.rules` denies every direct client read/write; only the services (service account) touch the data.
 
 ## Copying the existing Supabase data
 
@@ -39,10 +39,10 @@ The source is only read.
 
 ```
 pip install sqlalchemy psycopg2-binary                     # needed by the script only
-cd module1-auth
+cd server/auth
 python migrate_from_sql.py --source-url "postgresql://postgres.<ref>:<password>@<host>:5432/postgres" --dry-run
 python migrate_from_sql.py --source-url "postgresql://..."
-cd ../module7-admin && python migrate_from_sql.py --source-url "postgresql://..."
+cd ../server/admin && python migrate_from_sql.py --source-url "postgresql://..."
 ```
 
 - Ids are preserved, so issued JWTs, case links and Module 3's hospital-scoped service tokens keep working.
@@ -75,7 +75,7 @@ the local store; the Firestore backend's queries/batches built with the real cli
 migration scripts end to end from a SQLite database created with the old models.
 
 **Not** verified: a run against real Firestore or the emulator (it could not be downloaded where this was built).
-Before production, run `FIRESTORE_EMULATOR_HOST=localhost:8080 python -m pytest module1-auth/test_docstore.py`
+Before production, run `FIRESTORE_EMULATOR_HOST=localhost:8080 python -m pytest server/auth/test_docstore.py`
 against `firebase emulators:start --only firestore`, then your own smoke test against a staging project.
 
 ## Rolling back

@@ -1,8 +1,8 @@
 """
 Request size limits for the vitals upload / validation endpoints.
 
-CANONICAL COPY: duplicated verbatim into module1-auth and
-module2-validation (see config.py's note).
+CANONICAL COPY: duplicated verbatim into server/auth and
+server/validation (see config.py's note).
 
 Three layers, all answering HTTP 413:
 

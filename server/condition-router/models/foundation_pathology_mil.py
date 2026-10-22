@@ -57,7 +57,7 @@ except (ImportError, OSError):
 
 import os
 
-import paths  # noqa: F401  (adds module5-modelzoo to sys.path)
+import paths  # noqa: F401  (adds server/model-zoo to sys.path)
 from base import PredictionResult, SpecialistModel
 
 CLASS_NAMES = ["benign", "malignant"]

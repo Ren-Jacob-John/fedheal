@@ -6,7 +6,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [module1-auth, module2-validation, module3-fedlearning, module5-modelzoo, module6-condition-router, module7-admin, module8-synthesis]
+        module: [server/auth, server/validation, module3-fedlearning, server/model-zoo, server/condition-router, server/admin, server/synthesis]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -15,7 +15,7 @@ jobs:
         run: |
           pip install pytest
           pip install -r ${{ matrix.module }}/requirements.txt
-          if [ "${{ matrix.module }}" = module6-condition-router ]; then pip install -r module5-modelzoo/requirements.txt; fi
+          if [ "${{ matrix.module }}" = server/condition-router ]; then pip install -r server/model-zoo/requirements.txt; fi
       - run: python -m pytest -q
         working-directory: ${{ matrix.module }}
         env: {FEDHEAL_ENV: development}
@@ -27,7 +27,7 @@ jobs:
         with: {python-version: "3.12"}
       - run: |
           pip install pytest
-          for m in module1-auth module2-validation module3-fedlearning module7-admin module8-synthesis; do pip install -r $m/requirements.txt; done
+          for m in server/auth server/validation module3-fedlearning server/admin server/synthesis; do pip install -r $m/requirements.txt; done
       - run: python -m pytest -q tests
         env: {FEDHEAL_ENV: development}
   dashboard:
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: 20}
       - run: npm ci && npm run build
-        working-directory: module4-dashboard-react
+        working-directory: client/dashboard
   browser-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -49,7 +49,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: module4-dashboard-react/package-lock.json
+          cache-dependency-path: client/dashboard/package-lock.json
       - name: Create ephemeral development-only Compose configuration
         run: |
           python - <<'PY'
@@ -82,12 +82,12 @@ jobs:
             -e "FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD=$FEDHEAL_E2E_SUPER_ADMIN_PASSWORD" \
             auth python create_super_admin.py --email pw-e2e-admin@fedheal.test
       - name: Install dashboard and browser dependencies
-        working-directory: module4-dashboard-react
+        working-directory: client/dashboard
         run: |
           npm ci
           npx playwright install --with-deps chromium
       - name: Run browser workflow
-        working-directory: module4-dashboard-react
+        working-directory: client/dashboard
         env:
           FEDHEAL_E2E_SUPER_ADMIN_EMAIL: pw-e2e-admin@fedheal.test
           FEDHEAL_E2E_AUTH_API_URL: http://localhost:8001

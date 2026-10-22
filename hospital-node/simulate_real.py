@@ -13,7 +13,7 @@ Prerequisites (this is real integration, not a standalone demo):
   2. Module 2 (validation) running on :8002
   3. At least 2 hospitals registered in Module 1, each with >= MIN_RECORDS
      validated vitals uploaded (via the dashboard's upload form, or curl
-     against POST /vitals/upload — see module1-auth/README.md)
+     against POST /vitals/upload — see server/auth/README.md)
   This operator-side process previously fetched and pooled multiple hospitals'
   raw records in one process. That violates the hospital privacy boundary and
   is now refused by real_data.load_real_partitions(). Use hospital-local
@@ -126,7 +126,7 @@ def main():
         print(
             f"\nOnly {len(partitions)} hospital(s) have >= {MIN_RECORDS} validated vitals "
             "records right now — need at least 2 for a meaningful federated round.\n"
-            "Upload more vitals via the dashboard (module4-dashboard-react) for a couple of "
+            "Upload more vitals via the dashboard (client/dashboard) for a couple of "
             "hospitals, then re-run this script. (simulate.py's synthetic version still "
             "works standalone in the meantime.)"
         )

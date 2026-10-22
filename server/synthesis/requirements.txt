@@ -1,6 +1,6 @@
-# module8-synthesis's own logic (synthesis.py) has no third-party deps of
+# server/synthesis's own logic (synthesis.py) has no third-party deps of
 # its own — everything below is either the FastAPI service shell (new in
-# Sprint B) or what module6-condition-router/module5-modelzoo need, since
+# Sprint B) or what server/condition-router/server/model-zoo need, since
 # main.py imports both directly (see sys.path insertion at the top of
 # main.py / synthesis.py / demo.py).
 
@@ -10,7 +10,7 @@ python-jose[cryptography]==3.3.0
 pydantic==2.9.2
 python-dotenv==1.0.1
 
-# Shared with module6-condition-router (kept in sync with its
+# Shared with server/condition-router (kept in sync with its
 # requirements.txt — the vitals specialist + SHAP explainer this
 # service's one endpoint exercises need these):
 scikit-learn==1.5.2

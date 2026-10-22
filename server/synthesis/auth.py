@@ -24,7 +24,7 @@ ALGORITHM = "HS256"
 
 # Same cookie name Module 1 sets on login — browsers send cookies by host,
 # not by port, so the dashboard's session cookie reaches this service too,
-# as long as both are same-site (see module7-admin/auth.py for the same
+# as long as both are same-site (see server/admin/auth.py for the same
 # pattern, already in production use there).
 TOKEN_COOKIE_NAME = "fedheal_token"
 

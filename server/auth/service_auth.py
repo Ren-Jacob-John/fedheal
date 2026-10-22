@@ -2,8 +2,8 @@
 Service-to-service credentials that can express WHO is calling and WHICH
 HOSPITAL they may act for.
 
-CANONICAL COPY: duplicated verbatim into module1-auth, module2-validation,
-module3-fedlearning, module7-admin and module8-synthesis (see config.py's note; tests/test_shared_files_in_sync.py
+CANONICAL COPY: duplicated verbatim into server/auth, server/validation,
+module3-fedlearning, server/admin and server/synthesis (see config.py's note; tests/test_shared_files_in_sync.py
 enforces it).
 
 Why this exists

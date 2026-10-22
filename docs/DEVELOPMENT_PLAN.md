@@ -104,22 +104,22 @@ schedule slack the other weeks can borrow.
 - **Security & infra hardening, finish (P1):** Alembic migrations
   complete and applied to the staging database. *Status: code-complete
   — `create_all`/`FEDHEAL_AUTO_CREATE_TABLES` removed from
-  `module1-auth/main.py`, `/health` added, docs updated. Actually
+  `server/auth/main.py`, `/health` added, docs updated. Actually
   running `alembic stamp 0001_baseline && alembic upgrade head` against
   the real staging `FEDHEAL_DATABASE_URL` is an operator action against
   live infra this environment doesn't have credentials for — the module
-  is ready for it, see module1-auth.md.*
+  is ready for it, see server/auth.md.*
 - **Frontend, start (P4):** build the Module 8 synthesis view (rendering
   a `SynthesisReport` — findings, disclaimer, stub markers — in the
   dashboard) and SHAP chart rendering, since SHAP is the one explainer
   that pairs with a genuinely real (non-stub) specialist today (the
   vitals/TabPFN path). **Grad-CAM heatmap UI is deferred** — see section
   4; there's no real imaging output yet for it to visualize. *Status:
-  done — `module8-synthesis/main.py` (new HTTP service, scoped to
+  done — `server/synthesis/main.py` (new HTTP service, scoped to
   `heart_disease`/vitals per the risk-register note below) plus
   `SynthesisView.jsx` and `ShapChart.jsx` in the dashboard. Runs
   end-to-end against the vitals specialist actually installed (TabPFN if
-  available, XGBoost fallback per module5-modelzoo/registry.py) — real
+  available, XGBoost fallback per server/model-zoo/registry.py) — real
   SHAP contributions, not mocked data.*
 
 ### Sprint C — Sep 28 to Oct 4 (finish week 14, start week 15) — ✅ CODE-COMPLETE
@@ -140,7 +140,7 @@ schedule slack the other weeks can borrow.
     Module 5/6's stub-fallback logic — highest safety value per record).
   - Integration tests across module boundaries (Module 1→2, 1→7,
     5→6→8, and the dashboard against a running backend).
-  - Dockerfile per service; draft `docker-compose.yml` for full local
+  - Dockerfile per service; draft `infra/docker-compose.yml` for full local
     stack.
   - Start the IRB/HIPAA/GDPR compliance write-up (documentation only —
     what a real deployment would require, not the approval process
@@ -151,7 +151,7 @@ schedule slack the other weeks can borrow.
 
 | Day | Task |
 |---|---|
-| Oct 5–6 | Finish `docker-compose.yml`; finish the CI pipeline (lint + unit tests on push); finish the compliance write-up |
+| Oct 5–6 | Finish `infra/docker-compose.yml`; finish the CI pipeline (lint + unit tests on push); finish the compliance write-up |
 | Oct 7 | Deploy to staging; run the full test suite against staging, not just local |
 | Oct 8 | Fix whatever staging surfaces; lock down CORS/secrets for the real deployed origin |
 | Oct 9 | Deploy to production; seed realistic demo data |

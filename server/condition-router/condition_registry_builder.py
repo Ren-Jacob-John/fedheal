@@ -38,13 +38,13 @@ try:
 except (ImportError, OSError):
     FOUNDATION_PATHOLOGY_IMPORT_OK = False
 
-# --- New genomic variant track (Evo 2 — see module5-modelzoo's
+# --- New genomic variant track (Evo 2 — see server/model-zoo's
 # models/foundation_evo2.py module docstring for exactly how this
 # complements, rather than in-place replaces, GenomicExpressionModel: it
 # takes variant-call sequence data, not an expression panel, so it's wired
 # in below as an additional specialist_id per condition rather than a
 # swap of the existing genomic_* entries). Imported from module5 directly
-# (paths.py already puts module5-modelzoo on sys.path) — one definition,
+# (paths.py already puts server/model-zoo on sys.path) — one definition,
 # reused here exactly like module5's own vitals/chest_xray/etc. entries
 # already are a few lines down.
 try:

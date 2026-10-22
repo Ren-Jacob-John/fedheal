@@ -1,9 +1,9 @@
 # VITE_* values are baked in at build time (they are public URLs, never secrets).
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY module4-dashboard-react/package*.json ./
+COPY client/dashboard/package*.json ./
 RUN npm ci
-COPY module4-dashboard-react/ ./
+COPY client/dashboard/ ./
 ARG VITE_AUTH_API_BASE=http://localhost:8001
 ARG VITE_ADMIN_API_BASE=http://localhost:8005
 ARG VITE_SYNTHESIS_API_BASE=http://localhost:8006

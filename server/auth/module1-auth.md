@@ -86,7 +86,7 @@ labels.
 ## How to run it
 
 ```bash
-cd module1-auth
+cd server/auth
 pip install -r requirements.txt
 cp .env.example .env        # then fill in real values; in development the
                              # data lives in ./fedheal_auth_store.json
@@ -103,7 +103,7 @@ small `user_emails` / `hospital_names` uniqueness indexes) appear on first write
 Per Firebase project, once, deploy the rules and the composite indexes:
 
 ```bash
-firebase deploy --only firestore:rules,firestore:indexes     # firestore.rules, firestore.indexes.json at the repo root
+firebase deploy --only firestore:rules,firestore:indexes     # infra/firestore.rules, infra/firestore.indexes.json at the repo root
 ```
 
 Backend selection (`FEDHEAL_DB_BACKEND`): `firestore` (default in staging/production;
@@ -112,7 +112,7 @@ or an attached service account), `local` (default in development: a JSON file at
 `FEDHEAL_LOCAL_STORE_PATH`, default `./fedheal_auth_store.json`) or `memory` (tests).
 `local`/`memory` are refused outside development/test, and `FIRESTORE_EMULATOR_HOST`
 (the Firebase emulator) is refused in production. Tenant isolation is still enforced in
-application code by `hospital_id` from the JWT; `firestore.rules` denies all direct client access.
+application code by `hospital_id` from the JWT; `infra/firestore.rules` denies all direct client access.
 
 Existing Supabase data: see `migrate_from_sql.py` and `docs/FIRESTORE_MIGRATION.md`.
 
@@ -192,7 +192,7 @@ on 500 unlabeled records used to report `ready_for_training`.
   the upload -> validate -> store path (dedicated unit tests are Sprint C).
 - ~~`create_all` and Alembic both live during this transitional sprint~~ —
   **superseded**: the SQL layer (and Alembic with it) was replaced by Firestore; there is
-  no schema step any more, only the indexes in `firestore.indexes.json`.
+  no schema step any more, only the indexes in `infra/firestore.indexes.json`.
 - ~~No `/health` endpoint~~ — **resolved in Sprint B**: added, same shape
   as Modules 2 and 7.
 - Cross-machine verification of the real networked FL path

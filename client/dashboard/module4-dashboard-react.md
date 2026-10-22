@@ -68,7 +68,7 @@ re-checks `/me` on every load regardless.
 ## How to run it
 
 ```bash
-cd module4-dashboard-react
+cd client/dashboard
 npm install
 cp .env.example .env.local     # point at your running Module 1 / Module 7
 npm run dev                    # http://localhost:5173

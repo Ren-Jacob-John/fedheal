@@ -14,7 +14,7 @@ a SQLite file) into the document store this service is now configured for.
 * Writes users, hospitals, their uniqueness index documents, vitals, cases,
   medical histories, clinician reviews and scan metadata (scan FILES are on disk
   under FEDHEAL_UPLOAD_STORAGE_PATH and are not touched).
-* Module 7's tables are copied by module7-admin/migrate_from_sql.py.
+* Module 7's tables are copied by server/admin/migrate_from_sql.py.
 * Password hashes are copied as they are (bcrypt), so nobody has to reset a password.
 """
 import argparse

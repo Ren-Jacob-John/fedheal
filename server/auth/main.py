@@ -35,7 +35,7 @@ from docs_theme import mount_custom_docs
 
 # Storage is Firestore (see database.py / docstore.py / repo.py). There are no
 # schema migrations: collections appear on first write, and the composite
-# indexes the ordered queries need are declared in firestore.indexes.json.
+# indexes the ordered queries need are declared in infra/firestore.indexes.json.
 
 app = FastAPI(title="FedHeal Auth Service", version="0.1.0", docs_url=None)
 mount_custom_docs(app, accent="#5b7cfa", accent_soft="#dfe7ff")  # blue — Module 1

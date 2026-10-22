@@ -1,4 +1,4 @@
-# Build context is the REPO ROOT (see docker-compose.yml), because some
+# Build context is the REPO ROOT (see infra/docker-compose.yml), because some
 # services import sibling modules. Build: docker build -f module3-fedlearning/Dockerfile .
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1

@@ -54,7 +54,7 @@ or `rejected`, with the specific reason(s) attached.
 ## How to run it
 
 ```bash
-cd module2-validation
+cd server/validation
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8002
 ```

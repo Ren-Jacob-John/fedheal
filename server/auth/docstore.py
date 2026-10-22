@@ -2,8 +2,8 @@
 Document store used by Module 1 and Module 7 — Firestore in staging/production,
 a local JSON-file (or pure in-memory) store for development and tests.
 
-CANONICAL COPY: this file is duplicated verbatim into module1-auth and
-module7-admin (each deploys on its own). tests/test_shared_files_in_sync.py
+CANONICAL COPY: this file is duplicated verbatim into server/auth and
+server/admin (each deploys on its own). tests/test_shared_files_in_sync.py
 fails if the copies drift apart — edit one, then copy it to the other.
 
 Why this exists
@@ -24,7 +24,7 @@ deliberately small interface (`Backend`) with two implementations:
 Everything above this layer (repo.py) only uses the methods below, so it runs
 unchanged against either backend. Only equality / simple range filters, one
 ordering and a limit are used — nothing that needs more than a composite index
-declared in firestore.indexes.json.
+declared in infra/firestore.indexes.json.
 
 Firestore facts the callers rely on (and the LocalBackend mimics):
   * no unique constraints -> uniqueness is enforced with an "index document"

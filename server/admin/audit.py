@@ -1,8 +1,8 @@
 """
 Structured audit logging for security-relevant actions.
 
-CANONICAL COPY: duplicated verbatim into module1-auth, module2-validation,
-module7-admin and module8-synthesis (see config.py's note).
+CANONICAL COPY: duplicated verbatim into server/auth, server/validation,
+server/admin and server/synthesis (see config.py's note).
 
 One JSON object per line on the `fedheal.audit` logger. Fields are an
 ALLOWLIST — anything not named below is dropped, so a careless call site

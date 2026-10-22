@@ -2,7 +2,7 @@
 One-off: copy Module 7's data (training rounds, validation-flag summaries, the
 model registry incl. weights) from the OLD SQL database into the document store
 this service is now configured for. Same usage and guarantees as
-module1-auth/migrate_from_sql.py: ids preserved, re-runnable (upserts), the
+server/auth/migrate_from_sql.py: ids preserved, re-runnable (upserts), the
 source is only read.
 
     pip install sqlalchemy psycopg2-binary

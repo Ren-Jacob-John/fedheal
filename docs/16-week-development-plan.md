@@ -19,7 +19,7 @@ clear slice without blocking each other.
 | 2 | Authentication & multi-tenancy | Module 1 | P1 | Hospital/user models, JWT login, hospital-scoped `get_current_user` pattern every later module follows | ✅ Done |
 | 3 | Data ingestion & validation | Module 2 | P2 | De-identification screen, schema/range/consistency checks, isolation-forest outlier flagging | ✅ Done |
 | 4 | Local training + FedAvg core | Module 3 | P3 | `HospitalClient`, manual FedAvg loop (`simulate.py`) proving federation beats a local-only baseline on synthetic non-IID data | ✅ Done |
-| 5 | Hospital dashboard v0 | Module 4 | P4 | Plain HTML/JS login + status view wired to Module 1's real API (historical — superseded by the React rebuild in `module4-dashboard-react/`) | ✅ Done (superseded) |
+| 5 | Hospital dashboard v0 | Module 4 | P4 | Plain HTML/JS login + status view wired to Module 1's real API (historical — superseded by the React rebuild in `client/dashboard/`) | ✅ Done (superseded) |
 | 6 | Model zoo & task router | Module 5 | P3 | `SpecialistModel` interface, XGBoost (real) + DenseNet201/ResNet50/EfficientNet/U-Net (real code, auto-stubbed without torch), metadata router, fusion layer | ✅ Done |
 | 7 | Condition router & explainability | Module 6 | P3 | Disease-name → specialist(s) + reasoning-method auto-switch; SHAP, Grad-CAM, and a rule-based knowledge-graph reasoner wired to real predictions | ✅ Done |
 | 8 | Admin / platform module | Module 7 | P1 | Cross-module operator view: hospital oversight (proxies Module 1), training-round history, validation-flag summaries, "trigger a round" endpoint | ✅ Done |
@@ -28,8 +28,8 @@ clear slice without blocking each other.
 | 11 | Imaging track goes live | Module 5 | P3 | Install torch/torchvision for real; fine-tune ResNet50 on APTOS 2019 (retinal) on at least one real specialist end-to-end; begin a ChestX-ray14 subset for DenseNet201 | ⬜ Planned |
 | 12 | Real networked federated learning | Module 3 | P3 + P1 | Stand up `server.py` for real; write `client_runner.py` a "hospital" machine actually runs (`fl.client.start_client`) over gRPC, replacing `simulate_real.py`'s in-process loop for actual multi-machine runs | 🟡 Partial — `server.py` (a real Flower `FedAvg` server) and `client_runner.py` (a real per-hospital client pulling that hospital's own data via `real_data.py`) are done and connect over plaintext gRPC; TLS is still open |
 | 13 | Security & infra hardening | Modules 1, 2, 7 | P1 | ~~Postgres migration~~ (Supabase wired in early — see below); Alembic migrations, real per-service credentials replacing the shared `X-Service-Key`, CORS lockdown, `/token` rate limiting, httpOnly-cookie token storage instead of `localStorage` | 🟡 Partial — per-service credentials, CORS lockdown, `/token` rate limiting, and httpOnly cookies are done; Alembic migrations still open |
-| 14 | Frontend rebuild | Module 4 (+ new admin UI) | P4 | React/Next.js hospital dashboard; CSV upload (not just pasted JSON); Grad-CAM heatmap overlays and SHAP charts rendered from Module 6's real explainer output; Module 8 synthesis view; an admin screen consuming Module 7's `/admin/overview` | 🟡 Partial — React federation map, super_admin operator views, vitals upload (JSON + CSV), and flagged-record human review are live in `module4-dashboard-react`; explainer charts and Module 8 synthesis rendering still open |
-| 15 | Testing, QA & deployment | All | Whole team | End-to-end integration tests across every module boundary; Dockerfile per service + one `docker-compose.yml` for full-stack local deploy; CI (lint + test on push); IRB/HIPAA/GDPR compliance write-up per the proposal's "real deployment" section | ⬜ Planned |
+| 14 | Frontend rebuild | Module 4 (+ new admin UI) | P4 | React/Next.js hospital dashboard; CSV upload (not just pasted JSON); Grad-CAM heatmap overlays and SHAP charts rendered from Module 6's real explainer output; Module 8 synthesis view; an admin screen consuming Module 7's `/admin/overview` | 🟡 Partial — React federation map, super_admin operator views, vitals upload (JSON + CSV), and flagged-record human review are live in `client/dashboard`; explainer charts and Module 8 synthesis rendering still open |
+| 15 | Testing, QA & deployment | All | Whole team | End-to-end integration tests across every module boundary; Dockerfile per service + one `infra/docker-compose.yml` for full-stack local deploy; CI (lint + test on push); IRB/HIPAA/GDPR compliance write-up per the proposal's "real deployment" section | ⬜ Planned |
 | 16 | Polish, demo & submission | All | Whole team | Bug-fix pass from week 15's testing; final run showing federated accuracy beating the local-only baseline on real data; demo script/video; final report and presentation slides | ⬜ Planned |
 
 ## Why this ordering
@@ -57,7 +57,7 @@ Modules 1 and 7's Postgres migration (originally scheduled for week 13)
 was pulled forward and wired up early, using Supabase as the managed
 Postgres provider — both services now read `FEDHEAL_DATABASE_URL` and
 fall back to local SQLite if it's unset, so nothing about local dev
-workflow changed. See `module1-auth/README.md`'s "Using Supabase" section
+workflow changed. See `server/auth/README.md`'s "Using Supabase" section
 for setup. Alembic migrations are still week 13 work — table creation is
 still "create if not exists," not a real migration story.
 

@@ -11,7 +11,7 @@ and label set is used, not by a different algorithm.
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 
-import paths  # noqa: F401  (adds module5-modelzoo to sys.path)
+import paths  # noqa: F401  (adds server/model-zoo to sys.path)
 from base import PredictionResult, SpecialistModel
 
 

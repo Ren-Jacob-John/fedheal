@@ -17,13 +17,13 @@ into documentation or source control.
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 $env:FEDHEAL_ENV = "development"
-python -m pip install -r module1-auth\requirements.txt
-python -m pip install -r module2-validation\requirements.txt
+python -m pip install -r server/auth\requirements.txt
+python -m pip install -r server/validation\requirements.txt
 python -m pip install -r module3-fedlearning\requirements.txt
-python -m pip install -r module5-modelzoo\requirements.txt
-python -m pip install -r module6-condition-router\requirements.txt
-python -m pip install -r module7-admin\requirements.txt
-python -m pip install -r module8-synthesis\requirements.txt
+python -m pip install -r server/model-zoo\requirements.txt
+python -m pip install -r server/condition-router\requirements.txt
+python -m pip install -r server/admin\requirements.txt
+python -m pip install -r server/synthesis\requirements.txt
 Copy-Item deploy\compose.env.example .env
 ```
 
@@ -36,7 +36,7 @@ not production secrets.
 Create the first super admin:
 
 ```powershell
-python module1-auth\create_super_admin.py --email admin@example.invalid
+python server/auth\create_super_admin.py --email admin@example.invalid
 ```
 
 The script reads the configured bootstrap password/environment as implemented
@@ -47,12 +47,12 @@ service startup or account creation.
 Start services in separate PowerShell windows:
 
 ```powershell
-python -m uvicorn main:app --app-dir module1-auth --port 8001
-python -m uvicorn main:app --app-dir module2-validation --port 8002
-python -m uvicorn main:app --app-dir module7-admin --port 8005
-python -m uvicorn main:app --app-dir module8-synthesis --port 8006
-npm --prefix module4-dashboard-react install
-npm --prefix module4-dashboard-react run dev
+python -m uvicorn main:app --app-dir server/auth --port 8001
+python -m uvicorn main:app --app-dir server/validation --port 8002
+python -m uvicorn main:app --app-dir server/admin --port 8005
+python -m uvicorn main:app --app-dir server/synthesis --port 8006
+npm --prefix client/dashboard install
+npm --prefix client/dashboard run dev
 ```
 
 The dashboard defaults to `http://localhost:5173`. Module 3's Flower server
@@ -65,10 +65,10 @@ after the required Module 1/7 service tokens and eligible data exist.
 python3 -m venv .venv
 source .venv/bin/activate
 export FEDHEAL_ENV=development
-for m in module1-auth module2-validation module3-fedlearning module5-modelzoo module6-condition-router module7-admin module8-synthesis; do
+for m in server/auth server/validation module3-fedlearning server/model-zoo server/condition-router server/admin server/synthesis; do
   python -m pip install -r "$m/requirements.txt"
 done
-cp deploy/compose.env.example .env
+cp infra/deploy/compose.env.example .env
 ```
 
 Copy each module `.env.example` to its local `.env`, then use the same
@@ -80,7 +80,7 @@ forward-slash paths.
 At the repository root:
 
 ```bash
-cp deploy/compose.env.example .env
+cp infra/deploy/compose.env.example .env
 # replace every CHANGE_ME value with a generated placeholder-safe secret
 docker compose config
 docker compose up --build

@@ -2,7 +2,7 @@
 Database for the Admin/Platform module's OWN data only: training-round
 history, validation-flag summaries and the model registry. Firestore in
 staging/production, a local JSON-file store for development — see
-docstore.py for the backend rules and module1-auth/database.py's docstring
+docstore.py for the backend rules and server/auth/database.py's docstring
 for the environment variables (they are identical here).
 
 Deliberately does NOT store a copy of the hospitals collection — hospital

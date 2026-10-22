@@ -80,7 +80,7 @@ in the module's own header comment, worth repeating here):**
 ## How to run it
 
 ```bash
-cd module7-admin
+cd server/admin
 pip install -r requirements.txt
 cp .env.example .env
 python seed_demo.py    # optional — populate realistic demo data

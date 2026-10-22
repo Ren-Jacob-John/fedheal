@@ -66,7 +66,7 @@ AUTH_API_URL = os.environ.get("FEDHEAL_AUTH_API_URL", "http://localhost:8001")
 #
 #   A hospital's own client (client_runner.py) holds ONE pre-minted token,
 #   FEDHEAL_SVC_TOKEN_M3_M1, issued for that hospital by
-#   `module1-auth/mint_service_token.py`. It can export that hospital's
+#   `server/auth/mint_service_token.py`. It can export that hospital's
 #   vitals and see that hospital in the directory — nothing else.
 #
 #   The central operator tool (simulate_real.py, which pools every active
@@ -91,7 +91,7 @@ def _signing_key() -> str | None:
 def _no_credential_error() -> RuntimeError:
     return RuntimeError(
         "No Module 1 credential configured. A hospital client needs "
-        "FEDHEAL_SVC_TOKEN_M3_M1 (mint one with module1-auth/mint_service_token.py); "
+        "FEDHEAL_SVC_TOKEN_M3_M1 (mint one with server/auth/mint_service_token.py); "
         "the operator's pooled simulation needs FEDHEAL_SVC_SIGNING_KEY_M3_M1."
     )
 

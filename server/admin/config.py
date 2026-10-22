@@ -2,8 +2,8 @@
 Environment + secret handling shared by every FedHeal service.
 
 CANONICAL COPY: this file is duplicated verbatim into each service folder
-(module1-auth, module2-validation, module3-fedlearning, module7-admin,
-module8-synthesis) because each module is deployed on its own with its own
+(server/auth, server/validation, module3-fedlearning, server/admin,
+server/synthesis) because each module is deployed on its own with its own
 requirements.txt. tests/test_shared_files_in_sync.py fails if the copies
 drift apart — edit one, then copy it to the others.
 

@@ -13,8 +13,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "module6-condition-router"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "module5-modelzoo"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "server/condition-router"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "server/model-zoo"))
 
 from condition_router import ConditionReport  # noqa: E402
 from fusion import FusedAssessment  # noqa: E402
@@ -105,7 +105,7 @@ class SynthesisReport:
     def to_dict(self) -> dict[str, Any]:
         """
         JSON-serializable form — new in Sprint B, for the dashboard's
-        Module 8 synthesis view (module4-dashboard-react). `to_markdown()`
+        Module 8 synthesis view (client/dashboard). `to_markdown()`
         stays the clinician-readable/CLI form; this is the same data, one
         shape flatter, so the frontend doesn't have to parse markdown to
         render findings, stub badges, and the disclaimer as UI elements.
@@ -160,7 +160,7 @@ def build_synthesis(
             explanation_details=explanation_details,
         ))
         if urgent:
-            # Sprint B: closes the gap module8-synthesis.md flagged — a
+            # Sprint B: closes the gap server/synthesis.md flagged — a
             # single finding's own metadata can now surface an urgent flag
             # even with no Module 5 fusion step involved, instead of only
             # ever coming from `fused.urgent_review_flags`.

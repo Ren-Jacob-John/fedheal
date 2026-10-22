@@ -3,7 +3,7 @@ Module 7 data access (training rounds, validation-flag summaries, model
 registry). Endpoints no longer build queries; they call this class.
 
 Composite indexes for the ordered queries are declared in
-firestore.indexes.json at the repo root.
+infra/firestore.indexes.json at the repo root.
 """
 from __future__ import annotations
 

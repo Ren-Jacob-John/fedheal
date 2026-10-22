@@ -16,7 +16,7 @@ Firestore settings:
 Every document carries hospital_id, and every query filters by the JWT's
 hospital_id in application code (repo.py / the endpoints), so tenant isolation
 holds regardless of backend. There are no schema migrations: documents are
-created on first write and indexes live in firestore.indexes.json.
+created on first write and indexes live in infra/firestore.indexes.json.
 """
 import config
 from dotenv import load_dotenv

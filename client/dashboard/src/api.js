@@ -252,7 +252,7 @@ export const adminApi = {
 // stub/fallback/training status and an explanation whose feature names are
 // the model's real inputs. Errors carry `err.code`: incomplete_data,
 // record_not_validated, unknown_condition, unsupported_input,
-// specialist_unavailable, ... (see module8-synthesis.md).
+// specialist_unavailable, ... (see server/synthesis.md).
 export const synthesisApi = {
   base: SYNTHESIS_API_BASE,
 

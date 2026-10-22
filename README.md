@@ -42,16 +42,16 @@ Requirements: Python 3.11+, Node.js 18+, and optionally Docker/Compose.
 python3 -m venv .venv
 source .venv/bin/activate
 export FEDHEAL_ENV=development
-for m in module1-auth module2-validation module3-fedlearning module5-modelzoo module6-condition-router module7-admin module8-synthesis; do
+for m in server/auth server/validation module3-fedlearning server/model-zoo server/condition-router server/admin server/synthesis; do
   python -m pip install -r "$m/requirements.txt"
 done
-cp deploy/compose.env.example .env
-python module1-auth/create_super_admin.py --email admin@example.invalid
-python -m uvicorn main:app --app-dir module1-auth --port 8001
+cp infra/deploy/compose.env.example .env
+python server/auth/create_super_admin.py --email admin@example.invalid
+python -m uvicorn main:app --app-dir server/auth --port 8001
 ```
 
 Start Modules 2, 7, 8 and the dashboard in separate terminals. For the full
-container path, copy `deploy/compose.env.example` to `.env`, replace
+container path, copy `infra/deploy/compose.env.example` to `.env`, replace
 placeholders, and run `docker compose up --build`. See [SETUP.md](docs/SETUP.md).
 
 ## Documentation

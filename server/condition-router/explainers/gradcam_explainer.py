@@ -4,7 +4,7 @@ EfficientNet) — highlights which pixels drove the prediction, per the
 proposal's original explainability-layer plan. Real implementation using
 forward/backward hooks on the last convolutional layer; falls back to a
 clearly labeled stub when torch isn't installed, same pattern as
-module5-modelzoo's imaging specialists.
+server/model-zoo's imaging specialists.
 """
 try:
     import torch

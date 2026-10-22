@@ -1,6 +1,6 @@
 # Full local stack. DRAFT (Sprint C): validated as YAML, not yet built/run in
 # an environment with Docker. Usage:
-#   cp deploy/compose.env.example .env   # then replace every CHANGE_ME
+#   cp infra/deploy/compose.env.example .env   # then replace every CHANGE_ME
 #   docker compose up --build
 # Every secret is required (":?"); compose refuses to start with one unset.
 # First login: docker compose exec -e FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD=... auth python create_super_admin.py --email you@example.org
@@ -32,7 +32,7 @@ services:
 
   auth:            # Module 1
     <<: *common
-    build: {context: ., dockerfile: module1-auth/Dockerfile}
+    build: {context: ., dockerfile: server/auth/Dockerfile}
     environment:
       <<: *firestore-env
       FEDHEAL_VALIDATION_API_URL: http://validation:8002
@@ -49,7 +49,7 @@ services:
 
   validation:      # Module 2
     <<: *common
-    build: {context: ., dockerfile: module2-validation/Dockerfile}
+    build: {context: ., dockerfile: server/validation/Dockerfile}
     environment:
       FEDHEAL_ADMIN_API_URL: http://admin:8005
     ports: ["8002:8002"]
@@ -62,7 +62,7 @@ services:
 
   admin:           # Module 7
     <<: *common
-    build: {context: ., dockerfile: module7-admin/Dockerfile}
+    build: {context: ., dockerfile: server/admin/Dockerfile}
     environment:
       <<: *firestore-env
       FEDMED_AUTH_API_URL: http://auth:8001
@@ -79,7 +79,7 @@ services:
 
   synthesis:       # Module 8 (Modules 5 and 6 are bundled into this image)
     <<: *common
-    build: {context: ., dockerfile: module8-synthesis/Dockerfile}
+    build: {context: ., dockerfile: server/synthesis/Dockerfile}
     environment:
       FEDHEAL_AUTH_API_URL: http://auth:8001
       FEDHEAL_ADMIN_API_URL: http://admin:8005     # where the PROMOTED model is read from
@@ -114,7 +114,7 @@ services:
   dashboard:       # Module 4; VITE_* URLs are baked in at build time
     build:
       context: .
-      dockerfile: module4-dashboard-react/Dockerfile
+      dockerfile: client/dashboard/Dockerfile
       args:
         VITE_AUTH_API_BASE: ${PUBLIC_AUTH_URL:-http://localhost:8001}
         VITE_ADMIN_API_BASE: ${PUBLIC_ADMIN_URL:-http://localhost:8005}

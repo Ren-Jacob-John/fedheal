@@ -11,15 +11,15 @@ layer.
 
 ```
 python -m venv .venv && . .venv/bin/activate
-pip install -r module1-auth/requirements.txt -r module2-validation/requirements.txt \
-  -r module3-fedlearning/requirements.txt -r module6-condition-router/requirements.txt \
-  -r module7-admin/requirements.txt -r module8-synthesis/requirements.txt
+pip install -r server/auth/requirements.txt -r server/validation/requirements.txt \
+  -r module3-fedlearning/requirements.txt -r server/condition-router/requirements.txt \
+  -r server/admin/requirements.txt -r server/synthesis/requirements.txt
 export FEDHEAL_ENV=development \
   FEDHEAL_DASHBOARD_ORIGIN=http://localhost:5173 FEDHEAL_BOOTSTRAP_ADMIN_PASSWORD=demo-bootstrap-password-1
-(cd module1-auth && python create_super_admin.py --email admin@demo.local)
-(cd module1-auth && uvicorn main:app --port 8001) &   (cd module2-validation && uvicorn main:app --port 8002) &
-(cd module7-admin && uvicorn main:app --port 8005) &  (cd module8-synthesis && uvicorn main:app --port 8006) &
-(cd module4-dashboard-react && npm ci && npm run dev) &
+(cd server/auth && python create_super_admin.py --email admin@demo.local)
+(cd server/auth && uvicorn main:app --port 8001) &   (cd server/validation && uvicorn main:app --port 8002) &
+(cd server/admin && uvicorn main:app --port 8005) &  (cd server/synthesis && uvicorn main:app --port 8006) &
+(cd client/dashboard && npm ci && npm run dev) &
 ```
 
 Services also need (development defaults exist for the signing keys; set real ones outside local use):
@@ -58,7 +58,7 @@ Services also need (development defaults exist for the signing keys; set real on
 11. **Rollback.** After a second promoted version exists, `POST /admin/models/rollback?model_name=vitals-fedavg-logreg&condition=heart_disease`.
 
 The integration test uses throwaway local document stores; it is not a
-Compose/Firestore-emulator run. Docker Compose (`docker-compose.yml`, with
+Compose/Firestore-emulator run. Docker Compose (`infra/docker-compose.yml`, with
 health checks and startup ordering) has **not** been run here.
 The queue-triggered two-hospital integration test was executed locally and
 passed: 7 passed. It runs services and Flower clients as separate processes;
@@ -74,7 +74,7 @@ analysis without a promoted model, configure the local stack with
 `FEDHEAL_ALLOW_DEMO_MODEL=true`. This deliberately enables only the labelled
 NON-CLINICAL demo model; do not use it for clinical or production data.
 
-From `module4-dashboard-react`, install dependencies and Chromium and run the
+From `client/dashboard`, install dependencies and Chromium and run the
 test with `npm ci`, `npx playwright install chromium`, then
 `npm run test:e2e`. The repository CI `browser-e2e` job provisions
 development-only secrets and the Compose/Firestore emulator services before

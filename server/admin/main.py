@@ -15,12 +15,12 @@ What's real vs. a prototype simplification, be upfront about both:
   - Hospital list/activate-deactivate: REAL — proxies live to Module 1,
     which is the actual source of truth (see hospitals_client.py). This
     also required adding one new endpoint to Module 1 itself:
-    `PATCH /hospitals/{id}` (super_admin only) — see module1-auth/main.py.
+    `PATCH /hospitals/{id}` (super_admin only) — see server/auth/main.py.
   - Training-round history: REAL, but requires Module 3 to report in.
     module3-fedlearning/simulate.py now does this automatically after
     each round (best-effort — if this service isn't running, the
     simulation still runs standalone, it just has nothing to report to).
-  - Validation-flag summaries: REAL, same pattern — module2-validation
+  - Validation-flag summaries: REAL, same pattern — server/validation
     now posts a rolled-up summary here after each batch validation call.
   - Retraining eligibility is count-only and off unless configured.
     Hospital runners poll durable, hospital-scoped requests; model
@@ -49,7 +49,7 @@ import model_registry
 import service_auth
 
 # Storage is Firestore (see database.py / docstore.py / repo.py): no schema to create or migrate.
-# Composite indexes for the ordered queries are declared in firestore.indexes.json.
+# Composite indexes for the ordered queries are declared in infra/firestore.indexes.json.
 
 app = FastAPI(title="FedHeal Admin/Platform Service", version="0.1.0", docs_url=None)
 mount_custom_docs(app, accent="#7c3fc9", accent_soft="#efe3fc")  # purple — Module 7

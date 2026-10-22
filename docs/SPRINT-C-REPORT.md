@@ -5,7 +5,7 @@
 | Item | Result |
 |---|---|
 | Dockerfile per service | Added for Modules 1, 2, 3 (FL server), 4, 7, 8. Build context is the repo root because Modules 7 and 8 import sibling modules. Non-root user. Module 1 runs `alembic upgrade head` on start. |
-| `docker-compose.yml` | Draft stack: Postgres, auth, validation, admin, synthesis, dashboard; FL server behind the `federation` profile. All secrets are required, none have defaults. `deploy/compose.env.example` lists them. |
+| `infra/docker-compose.yml` | Draft stack: Postgres, auth, validation, admin, synthesis, dashboard; FL server behind the `federation` profile. All secrets are required, none have defaults. `infra/deploy/compose.env.example` lists them. |
 | CI | `.github/workflows/ci.yml`: per-module pytest matrix, root integration tests, dashboard build. |
 | Compliance write-up | `docs/COMPLIANCE.md` (HIPAA/GDPR/IRB mapping, 9 named gaps, claims the demo must not make). |
 | Frontend | Dashboard builds; upload → record select → synthesize → SHAP/explanation flow is wired with error panels (incomplete data, not validated, specialist unavailable). Added favicon, robots.txt (noindex), title without em dash. |
@@ -13,7 +13,7 @@
 
 ## Bug found and fixed
 
-`module8-synthesis/requirements.txt` omitted `lightgbm` and `pandas`, which
+`server/synthesis/requirements.txt` omitted `lightgbm` and `pandas`, which
 Module 6 imports at load time. A clean install failed at test collection; it
 passed on machines that happened to have them. Fixed and verified in a fresh venv
 (27 passed). The new test prevents regression.

@@ -16,7 +16,7 @@ consolidated in [API_REFERENCE.md](API_REFERENCE.md).
 | `FEDHEAL_ALLOW_DEMO_MODEL` | Explicitly enables the non-clinical UCI fallback in Module 8. |
 | `VITE_*_API_BASE` | Build-time browser API base URLs for the dashboard. |
 
-## Module 1 — `module1-auth`
+## Module 1 — `server/auth`
 
 **Responsibility:** user authentication, tenant identity, hospitals, doctors,
 cases, structured history, vitals, scans, analyses, reviews, audit events, and
@@ -54,7 +54,7 @@ variables, and upload/scanning settings read by `config.py`/`limits.py`.
 serves Module 4 and Module 8 caller-scoped reads/writes. Status: **implemented,
 with local/Firestore backend alternatives**.
 
-## Module 2 — `module2-validation`
+## Module 2 — `server/validation`
 
 **Responsibility:** stateless vitals validation and count-only flag reporting.
 
@@ -99,7 +99,7 @@ arguments/environment used for service access.
 verified**. `simulate_real.py` intentionally refuses centralized raw-data
 pooling.
 
-## Module 4 — `module4-dashboard-react`
+## Module 4 — `client/dashboard`
 
 **Responsibility:** browser UI for login, hospital/federation views, uploads,
 flag reviews, cases, synthesis, rounds, and system visualization.
@@ -113,7 +113,7 @@ Module 8 endpoints listed in [API_REFERENCE.md](API_REFERENCE.md).
 **Configuration:** `VITE_AUTH_API_BASE`, `VITE_ADMIN_API_BASE`,
 `VITE_SYNTHESIS_API_BASE`. Status: **implemented UI; browser E2E not verified**.
 
-## Module 5 — `module5-modelzoo`
+## Module 5 — `server/model-zoo`
 
 **Responsibility:** specialist-model contracts, registry, fusion, runnable
 tabular vitals model, and explicit imaging/foundation stubs/fallbacks.
@@ -126,7 +126,7 @@ under `models/`.
 specialists are dependency/model-data gated or stubs**. It is imported by
 Modules 6 and 8.
 
-## Module 6 — `module6-condition-router`
+## Module 6 — `server/condition-router`
 
 **Responsibility:** condition alias resolution, specialist selection, and
 explanation attachment.
@@ -138,7 +138,7 @@ explanation attachment.
 Grad-CAM, knowledge graph, and many specialist paths are partial/stubbed**.
 Imported by Module 8 and uses Module 5.
 
-## Module 7 — `module7-admin`
+## Module 7 — `server/admin`
 
 **Responsibility:** platform overview, training rounds, count-only validation
 flags, retraining queue, model registry, validation gate, promotion, and
@@ -168,7 +168,7 @@ response summaries are in [API_REFERENCE.md](API_REFERENCE.md).
 `FEDHEAL_RETRAIN_MIN_ELIGIBLE_RECORDS`, and dashboard origin. Status:
 **implemented; no scheduler and no automatic promotion**.
 
-## Module 8 — `module8-synthesis`
+## Module 8 — `server/synthesis`
 
 **Responsibility:** caller-scoped record/case analysis, promoted-model lookup,
 condition routing, explanations, structured synthesis, considerations, and

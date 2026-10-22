@@ -94,7 +94,7 @@ real labels**, 16 soft-flagged as batch outliers by the isolation forest
 
 ## Workstream 2 — Alembic setup (P1)
 
-Set up in `module1-auth/` with two revisions:
+Set up in `server/auth/` with two revisions:
 
 - `0001_baseline` — the schema as it existed at week 9. Contains no new
   work on purpose; it exists so databases already built by `create_all`

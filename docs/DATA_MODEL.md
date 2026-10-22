@@ -5,7 +5,7 @@
 Module 1 and Module 7 use `docstore.py` through `repo.py`. `FEDHEAL_DB_BACKEND`
 selects Firestore, a development JSON-file store, or an in-memory backend.
 Firestore documents are created on first write; there is no runtime schema
-migration. `firestore.rules` denies all direct client reads and writes.
+migration. `infra/firestore.rules` denies all direct client reads and writes.
 
 ## Module 1 collections
 
@@ -40,7 +40,7 @@ second hospital collection.
 
 ## Indexes
 
-`firestore.indexes.json` defines composite indexes for:
+`infra/firestore.indexes.json` defines composite indexes for:
 
 - cases by `hospital_id` and descending `created_at`;
 - vitals by hospital/patient, hospital/validation status/patient,
@@ -55,14 +55,14 @@ There are no field overrides in the checked-in index file.
 
 ## Security rules
 
-`firestore.rules` matches every document path and sets `allow read, write: if
+`infra/firestore.rules` matches every document path and sets `allow read, write: if
 false`. Clients therefore cannot access Firestore directly. Server-side
 credentials bypass these client rules; tenant checks remain in the application
 repositories/routes.
 
 ## Leftover SQL/Alembic code
 
-`module1-auth` and `module7-admin` still contain `alembic.ini`, migration
+`server/auth` and `server/admin` still contain `alembic.ini`, migration
 templates, old SQLite artifacts, and `migrate_from_sql.py`. The active database
 path is the Firestore/local docstore implementation; the migration scripts are
 one-off import tooling, not the request-time persistence path. No Supabase

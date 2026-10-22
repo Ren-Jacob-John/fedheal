@@ -27,7 +27,7 @@ Prerequisites
   1. Module 1 (auth/vitals) running on :8001
   2. Module 2 (validation) running on :8002
   3. A super_admin account (hospital creation is SUPER_ADMIN-only): create
-     it with module1-auth/create_super_admin.py, then export
+     it with server/auth/create_super_admin.py, then export
      FEDHEAL_SEED_SUPER_ADMIN_EMAIL / FEDHEAL_SEED_SUPER_ADMIN_PASSWORD.
      Hospitals and their users are created by this script if they don't
      already exist.
@@ -135,14 +135,14 @@ def super_admin_headers(client: httpx.Client, auth_url: str) -> dict:
     Hospital creation/patching is SUPER_ADMIN-only. Credentials come from
     the environment (never a CLI flag, which would land in shell history):
     FEDHEAL_SEED_SUPER_ADMIN_EMAIL / FEDHEAL_SEED_SUPER_ADMIN_PASSWORD.
-    Create the first super_admin with module1-auth/create_super_admin.py.
+    Create the first super_admin with server/auth/create_super_admin.py.
     """
     email = os.environ.get("FEDHEAL_SEED_SUPER_ADMIN_EMAIL")
     password = os.environ.get("FEDHEAL_SEED_SUPER_ADMIN_PASSWORD")
     if not email or not password:
         raise SystemExit(
             "Set FEDHEAL_SEED_SUPER_ADMIN_EMAIL and FEDHEAL_SEED_SUPER_ADMIN_PASSWORD "
-            "(a super_admin account; see module1-auth/create_super_admin.py)."
+            "(a super_admin account; see server/auth/create_super_admin.py)."
         )
     login = client.post(f"{auth_url}/token", timeout=10.0, data={"username": email, "password": password})
     login.raise_for_status()

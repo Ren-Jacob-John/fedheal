@@ -18,7 +18,7 @@ conflicts with the current status.
 
 The active data layer is Firestore document storage (Modules 1 and 7), not
 SQLAlchemy/Postgres. Collection creation is implicit and indexed in
-`firestore.indexes.json`; there is no active Alembic migration layer for these
+`infra/firestore.indexes.json`; there is no active Alembic migration layer for these
 services. Do not use the historical SQL schema table below as the current
 storage description.
 
@@ -76,7 +76,7 @@ Browser (M4 React) ──cookie/Bearer JWT──► M1 auth/vitals  :8001 ──
 | Admin | M7 (rounds, flags, overview, hospital oversight proxy to M1) |
 | Synthesis | M8 (review packet; hard-coded `requires_clinician_review`) |
 | Tests | per-module `test_*.py` + root `tests/` (incl. `tests/integration/test_e2e_flow.py`) |
-| Docker | `docker-compose.yml`, one Dockerfile per module, `deploy/compose.env.example` |
+| Docker | `infra/docker-compose.yml`, one Dockerfile per module, `infra/deploy/compose.env.example` |
 | CI | `.github/workflows/ci.yml` |
 | Docs | `README.md`, per-module `moduleN-*.md`, `docs/` |
 
@@ -88,14 +88,14 @@ Ports: M1 8001 · M2 8002 · M7 8005 · M8 8006 · Flower 8080 · dashboard 5173
 
 | # | Directory | Purpose | Key files | Overall |
 |---|---|---|---|---|
-| 1 | `module1-auth` | Multi-tenant auth, hospital CRUD, vitals upload/review/export, audit | `main.py` (983 lines), `auth.py`, `service_auth.py`, `models.py`, `limits.py`, `audit.py`, `config.py`, `migrations/` | IMPLEMENTED |
-| 2 | `module2-validation` | 5-stage validation gate (de-id, schema, ranges, cross-field, outliers) | `main.py`, `rules.py`, `schema.py`, `anomaly.py`, `service_auth.py` | IMPLEMENTED |
+| 1 | `server/auth` | Multi-tenant auth, hospital CRUD, vitals upload/review/export, audit | `main.py` (983 lines), `auth.py`, `service_auth.py`, `models.py`, `limits.py`, `audit.py`, `config.py`, `migrations/` | IMPLEMENTED |
+| 2 | `server/validation` | 5-stage validation gate (de-id, schema, ranges, cross-field, outliers) | `main.py`, `rules.py`, `schema.py`, `anomaly.py`, `service_auth.py` | IMPLEMENTED |
 | 3 | `module3-fedlearning` | Local training + FedAvg (simulation and Flower server/client) | `server.py`, `client_runner.py`, `simulate*.py`, `fedavg.py`, `model.py`, `real_data.py`, `uci_heart.py` | PARTIAL |
-| 4 | `module4-dashboard-react` | Login, upload, flagged review, federation map, admin views, synthesis view | `src/App.jsx`, `src/api.js`, `src/components/*` | IMPLEMENTED (no tests) |
-| 5 | `module5-modelzoo` | Specialist-model interface, registry, router, fusion | `base.py`, `registry.py`, `router.py`, `fusion.py`, `models/*` | PARTIAL (most specialists are stubs here) |
-| 6 | `module6-condition-router` | Condition → specialists + explainers; SHAP/Grad-CAM/KG | `conditions.py`, `condition_router.py`, `condition_registry_builder.py`, `explainers/`, `models/` | PARTIAL |
-| 7 | `module7-admin` | Platform oversight: rounds, flags, overview, trigger | `main.py`, `models.py`, `hospitals_client.py`, `seed_demo.py` | IMPLEMENTED (no migrations) |
-| 8 | `module8-synthesis` | Review-packet synthesis for clinicians | `main.py`, `synthesis.py`, `feature_mapper.py`, `model_provider.py` | PARTIAL (demo model only) |
+| 4 | `client/dashboard` | Login, upload, flagged review, federation map, admin views, synthesis view | `src/App.jsx`, `src/api.js`, `src/components/*` | IMPLEMENTED (no tests) |
+| 5 | `server/model-zoo` | Specialist-model interface, registry, router, fusion | `base.py`, `registry.py`, `router.py`, `fusion.py`, `models/*` | PARTIAL (most specialists are stubs here) |
+| 6 | `server/condition-router` | Condition → specialists + explainers; SHAP/Grad-CAM/KG | `conditions.py`, `condition_router.py`, `condition_registry_builder.py`, `explainers/`, `models/` | PARTIAL |
+| 7 | `server/admin` | Platform oversight: rounds, flags, overview, trigger | `main.py`, `models.py`, `hospitals_client.py`, `seed_demo.py` | IMPLEMENTED (no migrations) |
+| 8 | `server/synthesis` | Review-packet synthesis for clinicians | `main.py`, `synthesis.py`, `feature_mapper.py`, `model_provider.py` | PARTIAL (demo model only) |
 
 ---
 
@@ -203,7 +203,7 @@ Ports: M1 8001 · M2 8002 · M7 8005 · M8 8006 · Flower 8080 · dashboard 5173
 | `training_rounds` | M7 | round number, n_hospitals, global_accuracy, baseline_accuracy, notes |
 | `validation_flags` | M7 | `hospital_id` (plain string, **no FK**), status, reason, count |
 
-Schema management: M1 Alembic (2 revisions). M7: `create_all`. The committed `module1-auth/fedmed_auth.db` is an empty SQLite file (0 rows in all 3 tables); it is gitignored via `*.db`, so it should not be in the archive.
+Schema management: M1 Alembic (2 revisions). M7: `create_all`. The committed `server/auth/fedmed_auth.db` is an empty SQLite file (0 rows in all 3 tables); it is gitignored via `*.db`, so it should not be in the archive.
 
 ---
 
@@ -222,9 +222,9 @@ Intentional copies, enforced by `tests/test_shared_files_in_sync.py` (verified b
 Not removed: they work and are guarded by a test. Candidate for a shared package later, but that is a larger change than this audit warrants.
 
 Other:
-- `module8-synthesis/synthesis.py`, `main.py`, `demo.py` and M6 use `sys.path.insert` to reach sibling modules; Dockerfile and CI install sibling requirements to match.
+- `server/synthesis/synthesis.py`, `main.py`, `demo.py` and M6 use `sys.path.insert` to reach sibling modules; Dockerfile and CI install sibling requirements to match.
 - Three overlapping planning docs: `docs/DEVELOPMENT_PLAN.md`, `docs/16-week-development-plan.md`, `docs/SPRINT-*`.
-- `module1-auth/__pycache__`, `module5-modelzoo/__pycache__` and the empty `.db` shipped in the archive.
+- `server/auth/__pycache__`, `server/model-zoo/__pycache__` and the empty `.db` shipped in the archive.
 
 ---
 
@@ -248,16 +248,16 @@ Other:
 
 | Suite | Result |
 |---|---|
-| `module1-auth` | **149 passed** (78 s) |
-| `module2-validation` | **38 passed** |
+| `server/auth` | **149 passed** (78 s) |
+| `server/validation` | **38 passed** |
 | `module3-fedlearning` | **15 passed** (not in CI) |
-| `module5-modelzoo` | **6 passed** |
-| `module6-condition-router` | **13 passed** |
-| `module7-admin` | **21 passed** |
-| `module8-synthesis` | **27 passed** |
+| `server/model-zoo` | **6 passed** |
+| `server/condition-router` | **13 passed** |
+| `server/admin` | **21 passed** |
+| `server/synthesis` | **27 passed** |
 | root `tests/` (integration + sync) | **14 passed** |
 | **Total** | **283 passed, 0 failed** |
-| `module4-dashboard-react` | `npm ci && npm run build` succeeded (27 modules); no tests exist |
+| `client/dashboard` | `npm ci && npm run build` succeeded (27 modules); no tests exist |
 
 Not run / not verifiable here: Docker build and compose, Postgres, real Flower networked rounds, torch/GPU/foundation specialists, TabPFN (skipped: disk).
 
@@ -272,22 +272,22 @@ Local start (I ran these; all four `/health` returned 200 and the protected endp
 
 ```
 python -m venv .venv && . .venv/bin/activate
-pip install -r module1-auth/requirements.txt -r module2-validation/requirements.txt \
-            -r module7-admin/requirements.txt -r module8-synthesis/requirements.txt \
-            -r module6-condition-router/requirements.txt -r module3-fedlearning/requirements.txt
+pip install -r server/auth/requirements.txt -r server/validation/requirements.txt \
+            -r server/admin/requirements.txt -r server/synthesis/requirements.txt \
+            -r server/condition-router/requirements.txt -r module3-fedlearning/requirements.txt
 export FEDHEAL_ENV=development FEDHEAL_DATABASE_URL=sqlite:////tmp/fedheal.db \
        FEDMED_JWT_SECRET=<dev-only-secret> FEDHEAL_DASHBOARD_ORIGIN=http://localhost:5173 \
        FEDMED_AUTH_API_URL=http://localhost:8001 FEDHEAL_AUTH_API_URL=http://localhost:8001 \
        FEDHEAL_VALIDATION_API_URL=http://localhost:8002 FEDHEAL_ADMIN_API_URL=http://localhost:8005
-(cd module1-auth && alembic upgrade head)
-(cd module1-auth && uvicorn main:app --port 8001)
-(cd module2-validation && uvicorn main:app --port 8002)
-(cd module7-admin && uvicorn main:app --port 8005)
-(cd module8-synthesis && uvicorn main:app --port 8006)
-(cd module4-dashboard-react && npm ci && npm run dev)     # :5173
+(cd server/auth && alembic upgrade head)
+(cd server/auth && uvicorn main:app --port 8001)
+(cd server/validation && uvicorn main:app --port 8002)
+(cd server/admin && uvicorn main:app --port 8005)
+(cd server/synthesis && uvicorn main:app --port 8006)
+(cd client/dashboard && npm ci && npm run dev)     # :5173
 ```
 
-Full stack (**UNVERIFIED here**): `cp deploy/compose.env.example .env`, replace every `CHANGE_ME`, `docker compose up --build`; add `--profile federation` for the Flower server.
+Full stack (**UNVERIFIED here**): `cp infra/deploy/compose.env.example .env`, replace every `CHANGE_ME`, `docker compose up --build`; add `--profile federation` for the Flower server.
 
 Environment variables (see each `.env.example`): `FEDHEAL_ENV`, `FEDHEAL_DATABASE_URL` (`FEDHEAL_ADMIN_DATABASE_URL` for M7 override), `FEDMED_JWT_SECRET`, `FEDHEAL_DASHBOARD_ORIGIN`, `FEDHEAL_SVC_SIGNING_KEY_M3_M1`, `FEDHEAL_SVC_SIGNING_KEY_M1_M2`, `FEDHEAL_SVC_KEY_M2_M7`, `FEDHEAL_SVC_KEY_M3_M7`, `FEDHEAL_SVC_TOKEN_M3_M1`, `FEDHEAL_AUTH_API_URL`, `FEDMED_AUTH_API_URL`, `FEDHEAL_VALIDATION_API_URL`, `FEDHEAL_ADMIN_API_URL`, `FEDHEAL_ALLOW_DEMO_MODEL`, optional `FEDHEAL_MAX_*` limits; dashboard `VITE_AUTH_API_BASE`, `VITE_ADMIN_API_BASE`, `VITE_SYNTHESIS_API_BASE`. Staging/production require ≥32-char non-placeholder secrets and https origins.
 

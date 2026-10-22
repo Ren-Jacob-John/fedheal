@@ -42,7 +42,7 @@ specific variant call (chromosome, position, reference allele, alternate
 allele — the kind of record a VCF file or a genetic-counseling workup
 produces, not an expression microarray/RNA-seq panel). They are
 complementary genomic tracks, not two implementations of the same task —
-see module6-condition-router/EXPLANATION.md for how both get wired into
+see server/condition-router/EXPLANATION.md for how both get wired into
 the same disease conditions (breast cancer / leukemia) side by side, each
 firing when the caller has the matching kind of data for it.
 

@@ -16,8 +16,8 @@ sign-off. Imaging, genomic and CBC specialists are stubs (see DEVELOPMENT_PLAN Â
 
 | Concern | Implemented control | Where |
 |---|---|---|
-| Data minimisation | Stored record has no name, DOB, address or free text; `patient_ref` is a hospital-chosen pseudonym | `module1-auth/models.py`, DATA_CONTRACT.md |
-| De-identification screening | Forbidden-field check rejects identifier-like columns before storage | `module2-validation/rules.py` |
+| Data minimisation | Stored record has no name, DOB, address or free text; `patient_ref` is a hospital-chosen pseudonym | `server/auth/models.py`, DATA_CONTRACT.md |
+| De-identification screening | Forbidden-field check rejects identifier-like columns before storage | `server/validation/rules.py` |
 | Tenant isolation | Hospital-scoped JWT; cross-tenant access returns 403/404 and is audited | SECURITY.md |
 | Access control | Role-based endpoint table; service-to-service keys per edge | SECURITY.md |
 | Audit trail | Allow-listed JSON events, no values, no credentials | SECURITY.md, `audit.py` |
