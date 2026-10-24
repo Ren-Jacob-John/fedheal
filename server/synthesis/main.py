@@ -63,9 +63,13 @@ load_dotenv()  # picks up .env in this folder if present, same as every other mo
 logger = logging.getLogger("fedheal.synthesis")
 
 AUTH_API_URL = os.environ.get("FEDHEAL_AUTH_API_URL", "http://localhost:8001")
+# Module 1 refuses hospital admins/doctors without the dashboard Origin; this call acts for a user the dashboard already vetted.
+FORWARD_ORIGIN = config.dashboard_origins()[0]
 
-app = FastAPI(title="FedHeal Synthesis Service", version="0.2.0", docs_url=None)
-mount_custom_docs(app, accent="#2dd9c4", accent_soft="#d8fbf5")  # teal — Module 8
+app = FastAPI(title="FedHeal Synthesis Service", version="0.2.0", docs_url=None,
+              openapi_url="/openapi.json" if config.api_docs_enabled() else None)
+if config.api_docs_enabled():
+    mount_custom_docs(app, accent="#2dd9c4", accent_soft="#d8fbf5")  # teal — Module 8
 
 # Explicit origins only (required + https in staging/production) and only
 # what the dashboard uses against this service.
@@ -120,7 +124,7 @@ def models_status(condition: str = "heart_disease", _user: dict = Depends(requir
 
 async def fetch_record(record_id: str, token: str | None) -> dict:
     """Read one stored record from Module 1 as the calling user."""
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    headers = {"Authorization": f"Bearer {token}", "Origin": FORWARD_ORIGIN} if token else {}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(f"{AUTH_API_URL}/vitals/{record_id}", headers=headers)
@@ -300,7 +304,7 @@ NOT_SUPPORTED_YET = {
 
 
 async def _m1_get(path: str, token: str | None, *, missing_ok: bool = False):
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    headers = {"Authorization": f"Bearer {token}", "Origin": FORWARD_ORIGIN} if token else {}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(f"{AUTH_API_URL}{path}", headers=headers)
@@ -377,7 +381,7 @@ async def persist_case_analysis(case_id: str, token: str | None, packet: dict) -
     if not isinstance(payload["model_version"], str) or not isinstance(payload["model_status"], str):
         raise _error(502, "analysis_persistence_failed",
                      "Module 8 could not persist analysis because model metadata was incomplete.")
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    headers = {"Authorization": f"Bearer {token}", "Origin": FORWARD_ORIGIN} if token else {}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(

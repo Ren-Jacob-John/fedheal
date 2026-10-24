@@ -37,8 +37,10 @@ from docs_theme import mount_custom_docs
 # schema migrations: collections appear on first write, and the composite
 # indexes the ordered queries need are declared in infra/firestore.indexes.json.
 
-app = FastAPI(title="FedHeal Auth Service", version="0.1.0", docs_url=None)
-mount_custom_docs(app, accent="#5b7cfa", accent_soft="#dfe7ff")  # blue — Module 1
+app = FastAPI(title="FedHeal Auth Service", version="0.1.0", docs_url=None,
+              openapi_url="/openapi.json" if config.api_docs_enabled() else None)
+if config.api_docs_enabled():
+    mount_custom_docs(app, accent="#5b7cfa", accent_soft="#dfe7ff")  # blue — Module 1
 
 # Upload size limits (see limits.py). Added BEFORE the CORS middleware so
 # CORS wraps it: a 413 still carries CORS headers and the browser can show
@@ -242,6 +244,14 @@ class StoredVitalsOut(BaseModel):
 
 # ---------- Auth dependency ----------
 
+def _require_website(request: Request, role: str, user_id: str | None = None) -> None:
+    """Hospital admins and doctors may only act through the dashboard (see config.WEB_ONLY_ROLES)."""
+    if role in config.WEB_ONLY_ROLES and not config.is_dashboard_request(request.headers.get("origin")):
+        audit_event("authz.web_only", "denied", request=request, actor_user_id=user_id, actor_role=role,
+                    origin=request.headers.get("origin"))
+        raise HTTPException(status_code=403, detail="This account can only be used from the FedHeal website")
+
+
 def get_current_user(
     request: Request,
     token: str | None = Depends(oauth2_scheme),
@@ -271,6 +281,7 @@ def get_current_user(
     if user.is_active is False:
         audit_event("authn.failure", "denied", request=request, reason="account_disabled")
         raise credentials_exception
+    _require_website(request, user.role.value, user.id)
     return user
 
 
@@ -520,6 +531,7 @@ def login(
                     username_hash=hash_identifier(form_data.username))
         raise HTTPException(status_code=401, detail="Incorrect email or password")
 
+    _require_website(request, user.role.value, user.id)  # no token for scripts either
     token = auth.create_access_token(
         data={"sub": user.id, "hospital_id": user.hospital_id, "role": user.role.value}
     )

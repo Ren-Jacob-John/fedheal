@@ -46,6 +46,10 @@ def require_authenticated_user(request: Request, token: str | None = Depends(oau
     except JWTError:
         audit_event("authn.failure", "denied", request=request, reason="invalid_or_expired_token")
         raise unauthorized
+    if payload.get("role") in config.WEB_ONLY_ROLES and not config.is_dashboard_request(request.headers.get("origin")):
+        audit_event("authz.web_only", "denied", request=request, actor_user_id=payload.get("sub"),
+                    actor_role=payload.get("role"), origin=request.headers.get("origin"))
+        raise HTTPException(status_code=403, detail="This account can only be used from the FedHeal website")
     return payload
 
 

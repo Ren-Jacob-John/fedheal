@@ -192,3 +192,25 @@ def cors_settings(*, methods: tuple[str, ...], headers: tuple[str, ...] = ("Auth
         "allow_methods": list(methods),
         "allow_headers": list(headers),
     }
+
+
+# ---- "Website only" accounts -------------------------------------------------
+# Hospital admins and doctors may only use the API through the dashboard. The
+# browser always sends an Origin header on cross-origin calls and scripts cannot
+# change it from a page, so requests from /docs, other sites or plain HTTP clients
+# are refused. shortcut: a command-line client can still fake this header with
+# valid credentials; that needs network-level controls (VPN/allow-list), not code.
+WEB_ONLY_ROLES = frozenset({"hospital_admin", "clinician"})
+
+
+def dashboard_origins() -> list[str]:
+    return cors_settings(methods=())["allow_origins"]
+
+
+def is_dashboard_request(origin: str | None) -> bool:
+    return bool(origin) and origin.strip().rstrip("/") in dashboard_origins()
+
+
+def api_docs_enabled() -> bool:
+    """/docs and /openapi.json: always on locally; elsewhere only with FEDHEAL_ENABLE_API_DOCS=true."""
+    return is_local() or os.environ.get("FEDHEAL_ENABLE_API_DOCS", "").strip().lower() == "true"

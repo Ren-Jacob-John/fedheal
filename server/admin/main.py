@@ -51,8 +51,10 @@ import service_auth
 # Storage is Firestore (see database.py / docstore.py / repo.py): no schema to create or migrate.
 # Composite indexes for the ordered queries are declared in infra/firestore.indexes.json.
 
-app = FastAPI(title="FedHeal Admin/Platform Service", version="0.1.0", docs_url=None)
-mount_custom_docs(app, accent="#7c3fc9", accent_soft="#efe3fc")  # purple — Module 7
+app = FastAPI(title="FedHeal Admin/Platform Service", version="0.1.0", docs_url=None,
+              openapi_url="/openapi.json" if config.api_docs_enabled() else None)
+if config.api_docs_enabled():
+    mount_custom_docs(app, accent="#7c3fc9", accent_soft="#efe3fc")  # purple — Module 7
 
 # Explicit origins only (FEDHEAL_DASHBOARD_ORIGIN; required + https in
 # staging/production) and only the methods/headers the dashboard uses here.
