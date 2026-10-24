@@ -1,0 +1,18 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "$collection": {
+      ".indexOn": [
+        "hospital_id",
+        "case_id",
+        "condition",
+        "deployment_status",
+        "has_label",
+        "model_name",
+        "role",
+        "validation_status"
+      ]
+    }
+  }
+}
