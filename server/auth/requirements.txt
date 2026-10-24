@@ -8,3 +8,4 @@ python-multipart==0.0.9
 httpx==0.27.2
 python-dotenv==1.0.1
 google-cloud-firestore==2.34.1
+firebase-admin==6.8.0  # Realtime Database backend; 7.x needs httpx 0.28

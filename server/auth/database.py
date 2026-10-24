@@ -7,6 +7,12 @@ Backend selection (FEDHEAL_DB_BACKEND):
   unset in staging/production-> firestore
   firestore | local | memory -> explicit; local/memory are refused outside development/test
 
+Realtime Database (rtdb) settings:
+  FEDHEAL_FIREBASE_DATABASE_URL   required (unless FIREBASE_DATABASE_EMULATOR_HOST is set)
+  FIREBASE_DATABASE_EMULATOR_HOST e.g. localhost:9000
+  GOOGLE_APPLICATION_CREDENTIALS  as for Firestore
+  Rules: infra/database.rules.json (deny all client access; add new equality-filter fields to .indexOn)
+
 Firestore settings:
   FEDHEAL_FIREBASE_PROJECT_ID   required (unless FIRESTORE_EMULATOR_HOST is set)
   FEDHEAL_FIRESTORE_DATABASE    optional named database, default "(default)"

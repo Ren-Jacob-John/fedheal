@@ -392,12 +392,205 @@ class FirestoreBackend(Backend):
 
 
 # ----------------------------------------------------------------------------
+# RTDBBackend (Firebase Realtime Database)
+# ----------------------------------------------------------------------------
+# RTDB is a JSON tree, so documents live at  /<collection>/<doc key>/<field>.
+# What the tree does to data, and how this backend hides it:
+#   * keys may not contain . $ # [ ] /   -> doc ids are %-escaped (_key)
+#   * null, [] and {} are not stored      -> None / lists / dicts are wrapped in a
+#                                            marker object so they round-trip exactly
+#   * arrays become objects               -> lists are stored as JSON text
+#   * no datetime type                    -> {"__dt__": iso8601}
+#   * one orderBy per query               -> only the first equality filter runs on the
+#                                            server (add it to .indexOn in the rules);
+#                                            everything else is filtered/sorted here
+#   * no multi-location transactions      -> `create` claims its path with a transaction
+#                                            first, then all other ops go out as ONE atomic
+#                                            multi-path update. A failed claim or update
+#                                            deletes the claims made so far. A crash
+#                                            between the two steps can leave a claimed
+#                                            document behind (weaker than Firestore's batch).
+
+_KEY_ESCAPE = frozenset(".$#[]/%")
+
+
+def _key(doc_id: str) -> str:
+    return "".join(f"%{ord(c):02X}" if c in _KEY_ESCAPE or ord(c) < 32 or ord(c) == 127 else c
+                   for c in doc_id)
+
+
+def _enc(v):
+    if v is None:
+        return {"__null__": 1}
+    if isinstance(v, datetime):
+        return {"__dt__": v.isoformat()}
+    if isinstance(v, Enum):
+        return v.value
+    if isinstance(v, (list, tuple, dict)):
+        return {"__json__": json.dumps(v, default=_encode, separators=(",", ":"))}
+    return v
+
+
+def _dec(v):
+    if isinstance(v, dict):
+        if "__null__" in v:
+            return None
+        if "__dt__" in v:
+            return datetime.fromisoformat(v["__dt__"])
+        if "__json__" in v:
+            return json.loads(v["__json__"], object_hook=_decode)
+    return v
+
+
+def _enc_doc(doc: dict) -> dict:
+    return {k: _enc(v) for k, v in doc.items()}
+
+
+def _dec_doc(raw: dict) -> dict:
+    return {k: _dec(v) for k, v in raw.items()}
+
+
+class RTDBBackend(Backend):
+    """`root` is injectable (tests pass a fake); otherwise the firebase_admin app is created on first use."""
+
+    def __init__(self, database_url: str, root=None):
+        self._url, self._root_ref = database_url, root
+        self._init_lock = threading.Lock()
+
+    @classmethod
+    def from_env(cls) -> "RTDBBackend":
+        emulator = os.environ.get("FIREBASE_DATABASE_EMULATOR_HOST", "").strip()
+        url = os.environ.get("FEDHEAL_FIREBASE_DATABASE_URL", "").strip()
+        if emulator and not url:
+            project = os.environ.get("FEDHEAL_FIREBASE_PROJECT_ID", "").strip() or "demo-fedheal"
+            url = f"http://{emulator}/?ns={project}"
+        if not url:
+            raise RuntimeError("FEDHEAL_FIREBASE_DATABASE_URL must be set to use the Realtime Database "
+                               "(or set FIREBASE_DATABASE_EMULATOR_HOST to use the local emulator)")
+        return cls(url)
+
+    @property
+    def _root(self):
+        if self._root_ref is None:
+            with self._init_lock:
+                if self._root_ref is None:
+                    import firebase_admin
+                    from firebase_admin import db
+                    try:
+                        app = firebase_admin.get_app("fedheal-rtdb")
+                    except ValueError:
+                        app = firebase_admin.initialize_app(options={"databaseURL": self._url},
+                                                            name="fedheal-rtdb")
+                    self._root_ref = db.reference("/", app=app)
+        return self._root_ref
+
+    def _doc(self, coll, doc_id):
+        return self._root.child(f"{coll}/{_key(doc_id)}")
+
+    @staticmethod
+    def _rows(raw) -> list[dict]:
+        if not raw:
+            return []
+        values = raw.values() if isinstance(raw, dict) else [r for r in raw if r]  # all-numeric keys come back as a list
+        return [_dec_doc(d) for d in values]
+
+    def get(self, coll, doc_id):
+        raw = self._doc(coll, doc_id).get()
+        return _dec_doc(raw) if raw else None
+
+    def set(self, coll, doc_id, data):
+        self._doc(coll, doc_id).set(_enc_doc(data))
+
+    def delete(self, coll, doc_id):
+        self._doc(coll, doc_id).delete()
+
+    def _claim(self, coll, doc_id, value):
+        def fn(current):
+            if current is not None:
+                raise AlreadyExists(f"{coll}/{doc_id}")
+            return value
+        self._doc(coll, doc_id).transaction(fn)
+
+    def commit(self, ops):
+        if len(ops) > 500:
+            raise ValueError("a batch holds at most 500 writes; use bulk_set for large inserts")
+        # plan[(coll, id)] = [mode, value]; mode: claim (create) | full (set) | partial (update) | delete
+        plan: dict[tuple, list] = {}
+        for op in ops:
+            kind, coll, doc_id = op[0], op[1], op[2]
+            k, cur = (coll, doc_id), plan.get((coll, doc_id))
+            if kind == "create":
+                if cur is not None and cur[0] != "delete":
+                    raise AlreadyExists(f"{coll}/{doc_id}")
+                plan[k] = ["claim" if cur is None else "full", _enc_doc(op[3])]
+            elif kind == "set":
+                plan[k] = ["claim" if cur and cur[0] == "claim" else "full", _enc_doc(op[3])]
+            elif kind == "update":
+                if cur is None:
+                    if self._doc(coll, doc_id).get() is None:
+                        raise KeyError(f"{coll}/{doc_id} does not exist")
+                    plan[k] = ["partial", _enc_doc(op[3])]
+                elif cur[0] == "delete":
+                    raise KeyError(f"{coll}/{doc_id} does not exist")
+                else:
+                    cur[1].update(_enc_doc(op[3]))
+            elif kind == "delete":
+                plan[k] = ["delete", None]
+            else:
+                raise ValueError(f"unknown op {kind!r}")
+
+        claimed = []
+        try:
+            for (coll, doc_id), (mode, value) in plan.items():
+                if mode == "claim":
+                    self._claim(coll, doc_id, value)
+                    claimed.append((coll, doc_id))
+            writes = {}
+            for (coll, doc_id), (mode, value) in plan.items():
+                if mode == "partial":
+                    writes.update({f"{coll}/{_key(doc_id)}/{f}": v for f, v in value.items()})
+                elif mode != "claim":
+                    writes[f"{coll}/{_key(doc_id)}"] = value  # None deletes
+            if writes:
+                self._root.update(writes)
+        except BaseException:
+            for coll, doc_id in claimed:
+                try:
+                    self._doc(coll, doc_id).delete()
+                except Exception:  # noqa: BLE001 - best-effort undo; the original error is what matters
+                    logger.exception("could not undo claim %s/%s", coll, doc_id)
+            raise
+
+    def _fetch(self, coll, filters) -> list[dict]:
+        ref = self._root.child(coll)
+        for field, op, value in filters:
+            value = getattr(value, "value", value)
+            if op == "==" and isinstance(value, (str, int, float, bool)):
+                ref = ref.order_by_child(field).equal_to(value)
+                break
+        return [d for d in self._rows(ref.get()) if _matches(d, filters)]
+
+    def query(self, coll, filters=(), order_by=None, descending=False, limit=None):
+        rows = self._fetch(coll, filters)
+        if order_by:
+            rows = [r for r in rows if order_by in r]
+            rows.sort(key=lambda r: (r[order_by] is not None, r[order_by]), reverse=descending)
+        return rows[:limit] if limit is not None else rows
+
+    def count(self, coll, filters=()):
+        if not filters:
+            keys = self._root.child(coll).get(shallow=True)
+            return len(keys) if keys else 0
+        return len(self._fetch(coll, filters))
+
+
+# ----------------------------------------------------------------------------
 # Selection
 # ----------------------------------------------------------------------------
 
 def make_backend(*, local_default_path: str, is_local: bool, env: str) -> Backend:
     """
-    FEDHEAL_DB_BACKEND = firestore | local | memory
+    FEDHEAL_DB_BACKEND = firestore | rtdb | local | memory
       default: `local` (JSON file at FEDHEAL_LOCAL_STORE_PATH, else local_default_path) in development/test,
                `firestore` everywhere else.
     The local/memory stores have no access control and no durability guarantees, so they are
@@ -411,8 +604,12 @@ def make_backend(*, local_default_path: str, is_local: bool, env: str) -> Backen
         if choice == "memory":
             return LocalBackend(None)
         return LocalBackend(os.environ.get("FEDHEAL_LOCAL_STORE_PATH", "").strip() or local_default_path)
+    if choice == "rtdb":
+        if env == "production" and os.environ.get("FIREBASE_DATABASE_EMULATOR_HOST"):
+            raise RuntimeError("FIREBASE_DATABASE_EMULATOR_HOST is set while FEDHEAL_ENV=production; refusing to use the emulator")
+        return RTDBBackend.from_env()
     if choice != "firestore":
-        raise RuntimeError("FEDHEAL_DB_BACKEND must be one of: firestore, local, memory")
+        raise RuntimeError("FEDHEAL_DB_BACKEND must be one of: firestore, rtdb, local, memory")
     if env == "production" and os.environ.get("FIRESTORE_EMULATOR_HOST"):
         raise RuntimeError("FIRESTORE_EMULATOR_HOST is set while FEDHEAL_ENV=production; refusing to use the emulator")
     if os.environ.get("FIRESTORE_EMULATOR_HOST"):

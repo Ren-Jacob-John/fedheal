@@ -24,3 +24,6 @@ node_modules/
 model_artifacts/
 
 firebase_pk.json
+
+# Firebase CLI logs
+*-debug.log
